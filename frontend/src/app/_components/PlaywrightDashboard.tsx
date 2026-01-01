@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { getBuildHistory } from "@/lib/actions"; 
 import { 
   CheckCircle2, XCircle, FileCode, Folder, Loader2, 
-  Terminal, Hash, Monitor, Smartphone, Globe 
+  Terminal, Hash, Play, Video, ExternalLink 
 } from "lucide-react";
 
 export default function AutomationDashboard() {
@@ -43,7 +43,6 @@ export default function AutomationDashboard() {
 
   return (
     <div className="flex h-screen bg-[#09090b] text-zinc-300">
-      {/* Sidebar */}
       <aside className="w-80 border-r border-white/5 overflow-y-auto bg-[#0b0b0d]">
         <div className="p-5 border-b border-white/5 bg-black/20 font-black text-[10px] uppercase tracking-[0.2em] text-zinc-500">
           Execution Builds
@@ -70,7 +69,6 @@ export default function AutomationDashboard() {
         ))}
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 overflow-y-auto p-10 bg-[#09090b]">
         <header className="mb-12">
           <div className="flex items-center gap-4 mb-4">
@@ -93,7 +91,6 @@ export default function AutomationDashboard() {
         <div className="space-y-10">
           {selectedBuild?.results?.map((spec: any) => (
             <div key={spec.id} className="group">
-              {/* Spec File Label */}
               <div className="flex items-center gap-3 mb-4 px-2">
                 <FileCode className="w-5 h-5 text-indigo-500/50" />
                 <h2 className="text-md font-bold text-zinc-100 font-mono">{spec.specFile}</h2>
@@ -123,7 +120,6 @@ function RenderSuites({ tests }: { tests: any[] }) {
   return (
     <div className="space-y-12">
       {Object.entries(groupedBySuite).map(([suitePath, suiteTests]: [string, any]) => {
-        // Playwright logic: Detect browser from suite path
         const isChromium = suitePath.toLowerCase().includes('chromium');
         const isFirefox = suitePath.toLowerCase().includes('firefox');
         const isWebkit = suitePath.toLowerCase().includes('webkit');
@@ -135,13 +131,12 @@ function RenderSuites({ tests }: { tests: any[] }) {
               <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400">
                 {suitePath}
               </h3>
-              {/* Browser Badges for Playwright */}
               {isChromium && <BrowserBadge name="Chromium" color="bg-blue-500/10 text-blue-400 border-blue-500/20" />}
               {isFirefox && <BrowserBadge name="Firefox" color="bg-orange-500/10 text-orange-400 border-orange-500/20" />}
               {isWebkit && <BrowserBadge name="Webkit" color="bg-pink-500/10 text-pink-400 border-pink-500/20" />}
             </div>
 
-            <div className="ml-2 pl-8 border-l border-white/5 space-y-4">
+            <div className="ml-2 pl-8 border-l border-white/5 space-y-6">
               {suiteTests.map((test: any, idx: number) => (
                 <div key={idx} className="group">
                   <div className="flex items-center justify-between py-2 px-3 rounded-xl hover:bg-white/[0.03] border border-transparent hover:border-white/5 transition-all">
@@ -163,6 +158,37 @@ function RenderSuites({ tests }: { tests: any[] }) {
                     </div>
                     <span className="text-[10px] font-mono text-zinc-600">{test.duration}</span>
                   </div>
+
+                  {/* VIDEO PLAYER SECTION */}
+                  {test.video_url && (
+                    <div className="mt-4 ml-12 space-y-3">
+                        <div className="flex items-center gap-2">
+                             <span className="flex items-center gap-1.5 px-2 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-md text-[9px] font-black uppercase tracking-widest text-indigo-400">
+                                <Video className="w-3 h-3" />
+                                Recording Available
+                             </span>
+                             <a 
+                                href={test.video_url} 
+                                target="_blank" 
+                                className="p-1 hover:bg-white/5 rounded text-zinc-500 hover:text-white transition-colors"
+                                title="Open in New Tab"
+                             >
+                                <ExternalLink className="w-3 h-3" />
+                             </a>
+                        </div>
+                        <div className="relative group/video max-w-xl">
+                            <video 
+                                controls 
+                                preload="none"
+                                className="w-full rounded-xl border border-white/10 shadow-2xl bg-black aspect-video"
+                                poster="/video-placeholder.png"
+                            >
+                                <source src={test.video_url} type="video/webm" />
+                                Your browser does not support the video tag.
+                            </video>
+                        </div>
+                    </div>
+                  )}
 
                   {test.status === 'failed' && (
                     <div className="mt-3 ml-12 p-4 bg-red-500/[0.03] border border-red-500/10 rounded-xl shadow-inner">
