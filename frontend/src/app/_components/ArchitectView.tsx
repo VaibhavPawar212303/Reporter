@@ -7,7 +7,6 @@ import {
 } from "lucide-react";
 
 type ArchitectStep = "input" | "planning" | "review" | "generating" | "complete";
-
 interface ArchitectViewProps {
   socket: WebSocket | null;
 }
