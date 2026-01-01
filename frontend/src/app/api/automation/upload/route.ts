@@ -1,10 +1,4 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 export async function POST(req: Request) {
   try {
@@ -12,28 +6,34 @@ export async function POST(req: Request) {
     const file = formData.get('file') as File;
     const buildId = formData.get('buildId');
 
-    if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    if (!file) return NextResponse.json({ error: "No file" }, { status: 400 });
 
-    const fileName = `${buildId}/${Date.now()}_${file.name}`;
+    // 1. Prepare data for Discord
+    const discordPayload = new FormData();
+    // Use the native File object received from the request
+    discordPayload.append('file', file, file.name);
+    discordPayload.append('content', `📹 **Recording for Build #${buildId}**\nFile: \`${file.name}\``);
 
-    // Upload to Supabase Storage (Dashboard side logic)
-    const { data, error } = await supabase.storage
-      .from('test-videos')
-      .upload(fileName, file, { 
-        contentType: file.type,
-        upsert: true 
-      });
+    // 2. Send to Discord Webhook
+    const discordResponse = await fetch(process.env.DISCORD_WEBHOOK_URL!, {
+      method: 'POST',
+      body: discordPayload,
+    });
 
-    if (error) throw error;
+    if (!discordResponse.ok) {
+      const errorText = await discordResponse.text();
+      throw new Error(`Discord API Error: ${errorText}`);
+    }
 
-    // Generate Public URL
-    const { data: urlData } = supabase.storage
-      .from('test-videos')
-      .getPublicUrl(fileName);
+    const discordData = await discordResponse.json();
 
-    return NextResponse.json({ videoUrl: urlData.publicUrl });
+    // 3. Discord returns an array of 'attachments'. Get the direct URL.
+    const videoUrl = discordData.attachments[0].url;
+
+    // Return the URL to the Runner (Playwright/Cypress)
+    return NextResponse.json({ videoUrl });
   } catch (error: any) {
-    console.error("Upload Error:", error.message);
+    console.error("❌ Discord Upload Error:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
