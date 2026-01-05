@@ -49,10 +49,7 @@ export default function AutomationDashboard() {
         ));
         setSelectedBuild((prev: any) => {
             if (prev?.id !== updatedSpec.build_id) return prev;
-            return {
-                ...prev,
-                results: prev.results.map((r: any) => r.id === updatedSpec.id ? updatedSpec : r)
-            };
+            return { ...prev, results: prev.results.map((r: any) => r.id === updatedSpec.id ? updatedSpec : r) };
         });
     }).subscribe();
 
@@ -63,18 +60,16 @@ export default function AutomationDashboard() {
     setExpandedTests(prev => prev.includes(testId) ? prev.filter(id => id !== testId) : [...prev, testId]);
   };
 
-  // --- 🔥 LOGIC: Flatten all tests from all Specs and group them by Project ---
+  // Grouping logic: Flatten all specs into Unified Project buckets
   const aggregatedProjects = selectedBuild?.results?.reduce((acc: any, spec: any) => {
     spec.tests.forEach((test: any) => {
       const projectName = test.project || "Default";
       if (!acc[projectName]) acc[projectName] = [];
-      // Attach spec metadata to the test so we know where it came from
       acc[projectName].push({ ...test, specFile: spec.specFile, specId: spec.id });
     });
     return acc;
   }, {});
 
-  // Sort projects alphabetically
   const sortedProjectNames = Object.keys(aggregatedProjects || {}).sort();
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-[#09090b]"><Loader2 className="animate-spin text-indigo-500 w-8 h-8" /></div>;
@@ -101,12 +96,12 @@ export default function AutomationDashboard() {
                     <h1 className="text-4xl font-black text-white tracking-tighter">Build #{selectedBuild?.id}</h1>
                     <span className="px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded text-[9px] font-black text-indigo-400 uppercase tracking-widest">{selectedBuild?.environment}</span>
                 </div>
-                <p className="text-zinc-500 text-sm font-medium">Grouped by Project across all spec files</p>
+                <p className="text-zinc-500 text-sm font-medium">Consolidated Project View</p>
             </div>
             {selectedBuild?.results?.some((r:any) => r.tests.some((t:any) => t.status === 'running')) && (
                 <div className="flex items-center gap-2 px-4 py-2 bg-indigo-500/5 border border-indigo-500/10 rounded-xl animate-pulse">
                     <Activity className="w-4 h-4 text-indigo-500" />
-                    <span className="text-xs font-black text-indigo-500 uppercase tracking-widest">Live Execution</span>
+                    <span className="text-xs font-black text-indigo-500 uppercase tracking-widest">Live Sync</span>
                 </div>
             )}
         </header>
@@ -124,7 +119,7 @@ export default function AutomationDashboard() {
                                 <Cpu className={`w-6 h-6 ${isProjectRunning ? 'text-indigo-400' : 'text-zinc-500'}`} />
                             </div>
                             <div>
-                                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 block mb-1">Project</span>
+                                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 block mb-1">Project Environment</span>
                                 <span className="text-xl font-black text-white tracking-tight">{projectName}</span>
                             </div>
                         </div>
@@ -165,19 +160,18 @@ export default function AutomationDashboard() {
 
                                     {isExpanded && (
                                         <div className="px-8 pb-8 pt-2 space-y-8 animate-in fade-in slide-in-from-top-2 duration-300">
-                                            {/* Logs */}
                                             <div className="space-y-3">
                                                 <div className="flex items-center gap-2 text-zinc-500 px-1">
                                                     <Terminal className="w-3 h-3" />
-                                                    <span className="text-[9px] font-black uppercase tracking-widest">Realtime Logs</span>
+                                                    <span className="text-[9px] font-black uppercase tracking-widest">Worker Console</span>
                                                 </div>
                                                 <LogTerminal logs={test.logs || []} status={test.status} />
                                             </div>
-                                            {/* Video */}
+                                            
                                             <div className="space-y-3">
                                                 <div className="flex items-center gap-2 text-zinc-500 px-1">
                                                     <Video className="w-3 h-3" />
-                                                    <span className="text-[9px] font-black uppercase tracking-widest">Recording</span>
+                                                    <span className="text-[9px] font-black uppercase tracking-widest">Video Evidence</span>
                                                 </div>
                                                 {test.video_url ? (
                                                     <video controls className="w-full rounded-2xl border border-white/10 bg-black shadow-2xl aspect-video">
@@ -186,11 +180,11 @@ export default function AutomationDashboard() {
                                                 ) : (
                                                     <div className="aspect-video max-w-3xl bg-white/[0.02] border border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center gap-2">
                                                         <Video className="w-8 h-8 text-zinc-800" />
-                                                        <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">{test.status === 'running' ? 'Capturing video...' : 'No video'}</span>
+                                                        <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">{test.status === 'running' ? 'Recording in progress...' : 'No video'}</span>
                                                     </div>
                                                 )}
                                             </div>
-                                            {/* Error */}
+
                                             {test.status === 'failed' && test.error && (
                                                 <div className="p-5 bg-red-500/[0.02] border border-red-500/10 rounded-2xl text-[11px] text-red-400/80 font-mono whitespace-pre-wrap leading-relaxed">{test.error}</div>
                                             )}
@@ -209,23 +203,45 @@ export default function AutomationDashboard() {
   );
 }
 
+// 🔥 FIX: Added conditional scrolling based on status
 function LogTerminal({ logs, status }: { logs: string[], status: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [logs]);
+  const isRunning = status === 'running';
+
+  useEffect(() => {
+    // Only move the scrollbar if the test is currently RUNNING.
+    // If finished, we preserve the user's manual scroll position.
+    if (isRunning && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [logs, isRunning]);
+
   return (
-    <div className="rounded-2xl border border-white/5 bg-[#050505] overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 bg-white/[0.02]">
-        <div className="flex gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-red-500/20" /><div className="w-1.5 h-1.5 rounded-full bg-yellow-500/20" /></div>
-        <span className="text-[8px] font-mono text-zinc-600 uppercase tracking-widest">sh — logs</span>
+    <div className="rounded-2xl border border-white/5 bg-[#050505] overflow-hidden shadow-inner">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 bg-white/[0.02]">
+        <div className="flex items-center gap-2">
+            <div className={`w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-indigo-500 animate-pulse' : 'bg-zinc-700'}`} />
+            <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-widest">
+                {isRunning ? 'Streaming logs...' : 'Final execution log'}
+            </span>
+        </div>
+        <span className="text-[8px] font-mono text-zinc-600">{logs.length} lines</span>
       </div>
-      <div ref={scrollRef} className="p-5 font-mono text-[11px] max-h-64 overflow-y-auto leading-relaxed scroll-smooth custom-scrollbar">
+      <div ref={scrollRef} className="p-5 font-mono text-[11px] max-h-80 overflow-y-auto leading-relaxed scroll-smooth custom-scrollbar select-text">
         {logs.map((log, i) => (
           <div key={i} className="flex gap-4 mb-0.5 group">
-            <span className="text-zinc-800 select-none w-4 text-right">{i+1}</span>
-            <span className={/error|failed/i.test(log) ? 'text-red-400' : /✅|passed/i.test(log) ? 'text-green-400' : 'text-zinc-400'}>{log}</span>
+            <span className="text-zinc-800 select-none w-5 text-right italic">{i+1}</span>
+            <span className={/error|failed/i.test(log) ? 'text-red-400' : /✅|passed|success/i.test(log) ? 'text-green-400' : 'text-zinc-400'}>
+                {log}
+            </span>
           </div>
         ))}
-        {status === 'running' && <div className="w-1.5 h-3 bg-indigo-500 animate-pulse ml-8 mt-1" />}
+        {isRunning && (
+            <div className="flex gap-4 items-center mt-1">
+                <span className="text-zinc-800 select-none w-5 text-right italic">{logs.length + 1}</span>
+                <div className="w-1.5 h-4 bg-indigo-500 animate-pulse" />
+            </div>
+        )}
       </div>
     </div>
   );
@@ -245,6 +261,6 @@ function ProjectSummary({ tests }: { tests: any[] }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const color = status === 'failed' ? 'bg-red-500/10 text-red-500' : status === 'passed' ? 'bg-green-500/10 text-green-500' : 'bg-yellow-500/10 text-yellow-500';
+  const color = status === 'failed' ? 'bg-red-500/10 text-red-500' : status === 'passed' ? 'bg-green-500/10 text-green-500' : 'bg-indigo-500/10 text-indigo-500 animate-pulse';
   return <span className={`text-[9px] px-2 py-0.5 rounded font-black tracking-widest ${color}`}>{status.toUpperCase()}</span>;
 }
