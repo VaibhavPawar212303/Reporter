@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { getBuildHistory } from "@/lib/actions"; 
 import { createClient } from "@supabase/supabase-js";
 import { 
@@ -8,7 +8,6 @@ import {
   Terminal, Hash, Video, ExternalLink, Activity
 } from "lucide-react";
 
-// Initialize Supabase for Realtime
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -19,55 +18,68 @@ export default function AutomationDashboard() {
   const [selectedBuild, setSelectedBuild] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  const loadData = async () => {
+  // Use useCallback to memoize the data fetching logic
+  const loadData = useCallback(async (isInitial = false) => {
     try {
+      if (isInitial) setLoading(true);
       const data = await getBuildHistory();
+      
       setBuilds(data);
-      // Maintain selection on refresh
+
       if (data?.length > 0) {
-        setBuilds(current => {
-          if (selectedBuild) {
-            const updatedSelected = data.find((b: any) => b.id === selectedBuild.id);
-            setSelectedBuild(updatedSelected || data[0]);
-          } else {
-            setSelectedBuild(data[0]);
+        // We use a functional update to ensure we have the latest state 
+        // and maintain the user's selection during the background refresh
+        setSelectedBuild((currentSelected: any) => {
+          if (currentSelected) {
+            const updated = data.find((b: any) => b.id === currentSelected.id);
+            return updated || data[0];
           }
-          return data;
+          return data[0];
         });
       }
     } catch (error) {
       console.error("Failed to load builds:", error);
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
-  };
+  }, []);
 
+  // Effect 1: Handle the 2-second background refresh (Polling)
   useEffect(() => {
-    loadData();
+    // Initial fetch with loading spinner
+    loadData(true);
 
-    // 🔥 LIVE MODE: Subscribe to database changes
+    // Set up interval for background updates every 2 seconds
+    const intervalId = setInterval(() => {
+      // Only fetch if the tab is actually visible to the user
+      if (!document.hidden) {
+        loadData(false); // Silent refresh (no spinner)
+      }
+    }, 2000);
+
+    return () => clearInterval(intervalId);
+  }, [loadData]);
+
+  // Effect 2: Supabase Realtime (For granular log updates between polls)
+  useEffect(() => {
     const channel = supabase
       .channel('schema-db-changes')
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'test_results' },
         (payload) => {
-          console.log('Realtime update received:', payload.new);
-          
-          // Update the specific build in the list
           setBuilds((currentBuilds) => 
             currentBuilds.map((build) => {
               if (build.id === payload.new.build_id) {
                 const updatedResults = build.results.map((spec: any) => 
                   spec.id === payload.new.id ? payload.new : spec
                 );
-                
                 const updatedBuild = { ...build, results: updatedResults };
                 
-                // If this is the build currently being viewed, update the detail view
-                if (selectedBuild?.id === build.id) {
-                  setSelectedBuild(updatedBuild);
-                }
+                // Keep the detail view in sync with realtime logs
+                setSelectedBuild((prev: any) => 
+                  prev?.id === build.id ? updatedBuild : prev
+                );
                 
                 return updatedBuild;
               }
@@ -81,7 +93,7 @@ export default function AutomationDashboard() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedBuild?.id]);
+  }, []);
 
   const stats = selectedBuild?.results?.reduce((acc: any, spec: any) => {
     spec.tests.forEach((t: any) => {
@@ -100,7 +112,6 @@ export default function AutomationDashboard() {
 
   return (
     <div className="flex h-screen bg-[#09090b] text-zinc-300">
-      {/* Sidebar */}
       <aside className="w-80 border-r border-white/5 overflow-y-auto bg-[#0b0b0d]">
         <div className="p-5 border-b border-white/5 bg-black/20 font-black text-[10px] uppercase tracking-[0.2em] text-zinc-500">
           Execution Builds
@@ -118,16 +129,13 @@ export default function AutomationDashboard() {
               <StatusBadge status={build.status} />
             </div>
             <div className="flex items-center justify-between">
-              <p className="text-[10px] text-zinc-500 font-mono">
-                {new Date(build.createdAt).toLocaleDateString()}
-              </p>
+              <p className="text-[10px] text-zinc-500 font-mono">{new Date(build.createdAt).toLocaleDateString()}</p>
               <span className="text-[9px] text-zinc-600 font-bold uppercase">{build.environment}</span>
             </div>
           </button>
         ))}
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 overflow-y-auto p-10 bg-[#09090b]">
         <header className="mb-12">
           <div className="flex items-center gap-4 mb-4">
@@ -137,14 +145,15 @@ export default function AutomationDashboard() {
             <div>
               <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-black text-white tracking-tight">Build #{selectedBuild?.id}</h1>
-                {stats.running > 0 && <span className="flex items-center gap-1.5 px-2 py-1 bg-indigo-500/20 text-indigo-400 text-[10px] font-bold rounded-md animate-pulse">
-                  <Activity className="w-3 h-3" /> LIVE
-                </span>}
+                {stats.running > 0 && (
+                  <span className="flex items-center gap-1.5 px-2 py-1 bg-indigo-500/20 text-indigo-400 text-[10px] font-bold rounded-md animate-pulse">
+                    <Activity className="w-3 h-3" /> LIVE
+                  </span>
+                )}
               </div>
-              <p className="text-zinc-500 text-sm font-medium">Platform: Playwright / Cypress</p>
+              <p className="text-zinc-500 text-sm font-medium">Platform: Playwright / Cypress Automation</p>
             </div>
           </div>
-          
           <div className="flex gap-3">
             <StatCard label="Tests" value={stats.total} color="text-indigo-400" />
             <StatCard label="Passed" value={stats.passed} color="text-green-400" />
@@ -161,7 +170,6 @@ export default function AutomationDashboard() {
                 <h2 className="text-md font-bold text-zinc-100 font-mono">{spec.specFile}</h2>
                 <div className="h-px flex-1 bg-white/5 mx-4" />
               </div>
-
               <div className="bg-[#0c0c0e] border border-white/5 rounded-2xl p-6 shadow-2xl">
                 <RenderSuites tests={spec.tests} />
               </div>
@@ -187,73 +195,11 @@ function RenderSuites({ tests }: { tests: any[] }) {
         <div key={suitePath}>
           <div className="flex items-center gap-3 mb-6">
             <Folder className="w-4 h-4 text-zinc-600" />
-            <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400">
-              {suitePath}
-            </h3>
+            <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400">{suitePath}</h3>
           </div>
-
-          <div className="ml-2 pl-8 border-l border-white/5 space-y-6">
+          <div className="ml-2 pl-8 border-l border-white/5 space-y-8">
             {suiteTests.map((test: any, idx: number) => (
-              <div key={idx} className="group">
-                <div className="flex items-center justify-between py-2 px-3 rounded-xl hover:bg-white/[0.03] border border-transparent hover:border-white/5 transition-all">
-                  <div className="flex items-center gap-4">
-                    {/* STATUS ICONS INCLUDING RUNNING SPINNER */}
-                    {test.status === 'running' ? (
-                      <Loader2 className="w-4 h-4 text-indigo-500 animate-spin" />
-                    ) : (test.status === 'passed' || test.status === 'expected') ? (
-                      <CheckCircle2 className="w-4 h-4 text-green-500" />
-                    ) : (
-                      <XCircle className="w-4 h-4 text-red-500" />
-                    )}
-                    
-                    <div className="flex items-center gap-3">
-                      <span className="text-[10px] font-black text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-md">
-                        {test.case_code || 'N/A'}
-                      </span>
-                      <span className={`text-sm font-semibold transition-colors ${test.status === 'running' ? 'text-indigo-400 animate-pulse' : 'text-zinc-300 group-hover:text-white'}`}>
-                        {test.title}
-                      </span>
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-mono text-zinc-600">{test.duration || '--'}</span>
-                </div>
-
-                {/* 🔥 LIVE WORKER LOGS SECTION */}
-                {test.logs && test.logs.length > 0 && (
-                  <div className="mt-3 ml-12 p-3 bg-black/40 rounded-lg border border-white/5 font-mono text-[10px] text-zinc-500 max-h-40 overflow-y-auto">
-                    {test.logs.map((log: string, i: number) => (
-                      <div key={i} className="flex gap-2">
-                        <span className="text-indigo-900 shrink-0">›</span>
-                        <span className="whitespace-pre-wrap">{log}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {test.video_url && (
-                  <div className="mt-4 ml-12 space-y-3">
-                    <div className="flex items-center gap-2">
-                      <span className="flex items-center gap-1.5 px-2 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-md text-[9px] font-black uppercase tracking-widest text-indigo-400">
-                        <Video className="w-3 h-3" /> Recording
-                      </span>
-                    </div>
-                    <video controls preload="none" className="w-full max-w-xl rounded-xl border border-white/10 shadow-2xl bg-black aspect-video">
-                      <source src={test.video_url} type="video/webm" />
-                    </video>
-                  </div>
-                )}
-
-                {test.status === 'failed' && (
-                  <div className="mt-3 ml-12 p-4 bg-red-500/[0.03] border border-red-500/10 rounded-xl">
-                    <div className="flex gap-3">
-                      <Terminal className="w-4 h-4 text-red-500 shrink-0 mt-1" />
-                      <code className="text-[11px] text-red-400/90 leading-relaxed font-mono whitespace-pre-wrap block">
-                        {test.error}
-                      </code>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <TestRow key={idx} test={test} />
             ))}
           </div>
         </div>
@@ -262,8 +208,122 @@ function RenderSuites({ tests }: { tests: any[] }) {
   );
 }
 
-function BrowserBadge({ name, color }: { name: string, color: string }) {
-  return <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded border ${color}`}>{name}</span>;
+function TestRow({ test }: { test: any }) {
+  return (
+    <div className="group">
+      <div className="flex items-center justify-between py-2 px-3 rounded-xl hover:bg-white/[0.03] border border-transparent hover:border-white/5 transition-all">
+        <div className="flex items-center gap-4">
+          {test.status === 'running' ? (
+            <Loader2 className="w-4 h-4 text-indigo-500 animate-spin" />
+          ) : (test.status === 'passed' || test.status === 'expected') ? (
+            <CheckCircle2 className="w-4 h-4 text-green-500" />
+          ) : (
+            <XCircle className="w-4 h-4 text-red-500" />
+          )}
+          <div className="flex items-center gap-3">
+            <span className="text-[10px] font-black text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-md">
+              {test.case_code || 'N/A'}
+            </span>
+            <span className={`text-sm font-semibold transition-colors ${test.status === 'running' ? 'text-indigo-400 animate-pulse' : 'text-zinc-300 group-hover:text-white'}`}>
+              {test.title}
+            </span>
+          </div>
+        </div>
+        <span className="text-[10px] font-mono text-zinc-600">{test.duration || '--'}</span>
+      </div>
+
+      {(test.logs && test.logs.length > 0 || test.status === 'running') && (
+        <LogTerminal logs={test.logs || []} status={test.status} />
+      )}
+
+      {test.video_url && (
+        <div className="mt-4 ml-12 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 px-2 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-md text-[9px] font-black uppercase tracking-widest text-indigo-400">
+              <Video className="w-3 h-3" /> Recording
+            </span>
+            <a 
+              href={test.video_url} 
+              target="_blank" 
+              className="p-1 hover:bg-white/5 rounded text-zinc-500 hover:text-white transition-colors"
+            >
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+          <video controls preload="none" className="w-full max-w-xl rounded-xl border border-white/10 shadow-2xl bg-black aspect-video">
+            <source src={test.video_url} type="video/webm" />
+          </video>
+        </div>
+      )}
+
+      {test.status === 'failed' && (
+        <div className="mt-3 ml-12 p-4 bg-red-500/[0.03] border border-red-500/10 rounded-xl">
+          <div className="flex gap-3">
+            <Terminal className="w-4 h-4 text-red-500 shrink-0 mt-1" />
+            <code className="text-[11px] text-red-400/90 leading-relaxed font-mono whitespace-pre-wrap block">
+              {test.error}
+            </code>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LogTerminal({ logs, status }: { logs: string[], status: string }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [logs]);
+
+  return (
+    <div className="mt-4 ml-12 overflow-hidden rounded-lg border border-white/5 bg-[#050505] shadow-2xl">
+      <div className="flex items-center justify-between border-b border-white/5 bg-white/5 px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <Terminal className="w-3 h-3 text-zinc-500" />
+          <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">Worker Output</span>
+        </div>
+        <div className="flex gap-1.5">
+          <div className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
+          <div className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
+          <div className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
+        </div>
+      </div>
+
+      <div 
+        ref={scrollRef}
+        className="max-h-60 overflow-y-auto p-3 font-mono text-[10px] leading-relaxed scroll-smooth custom-scrollbar"
+      >
+        {logs.length === 0 && status === 'running' && (
+          <div className="text-zinc-600 italic">Initializing worker and starting test...</div>
+        )}
+        {logs.map((log, i) => {
+          const isError = /error|failed|exception|❌/i.test(log);
+          const isSuccess = /success|passed|✅/i.test(log);
+          
+          return (
+            <div key={i} className="flex gap-2 mb-0.5 group">
+              <span className="text-zinc-700 select-none">{i + 1}</span>
+              <span className="text-indigo-900 select-none">›</span>
+              <span className={`whitespace-pre-wrap ${isError ? 'text-red-400' : isSuccess ? 'text-green-400' : 'text-zinc-400'}`}>
+                {log}
+              </span>
+            </div>
+          );
+        })}
+        {status === 'running' && (
+          <div className="flex gap-2 items-center">
+             <span className="text-zinc-700 select-none">{logs.length + 1}</span>
+             <span className="text-indigo-900 select-none">›</span>
+             <span className="w-1.5 h-3 bg-indigo-500 animate-pulse inline-block" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function StatusBadge({ status }: { status: string }) {
