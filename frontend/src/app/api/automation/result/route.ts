@@ -35,8 +35,12 @@ export async function POST(req: Request) {
 
       let updatedTests = existingRecord ? (existingRecord.tests as any[]) : [];
       
-      // Find the specific test inside the array by title
-      const testIndex = updatedTests.findIndex((t) => t.title === test_entry.title);
+      // 🔥 FIX: Find the test using BOTH Title and Project
+      // This prevents Chromium tests from overwriting Firefox tests with the same name
+      const testIndex = updatedTests.findIndex((t) => 
+        t.title === test_entry.title && 
+        t.project === test_entry.project
+      );
 
       if (testIndex !== -1) {
         // --- UPDATE EXISTING TEST ---
@@ -44,7 +48,7 @@ export async function POST(req: Request) {
         
         updatedTests[testIndex] = {
           ...existingTest,
-          ...test_entry, // Updates status, duration, error, etc.
+          ...test_entry, // Updates status, duration, error, video_url, etc.
           // Append logs if a log_chunk was sent
           logs: sanitizedLog 
             ? [...(existingTest.logs || []), sanitizedLog] 
@@ -59,6 +63,7 @@ export async function POST(req: Request) {
       }
 
       // 4. Atomic Upsert back to the database
+      // The onConflictDoUpdate relies on the unique(build_id, spec_file) constraint in your schema
       await tx.insert(testResults)
         .values({
           buildId: build_id,

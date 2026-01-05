@@ -5,7 +5,8 @@ import { getBuildHistory } from "@/lib/actions";
 import { createClient } from "@supabase/supabase-js";
 import { 
   CheckCircle2, XCircle, FileCode, Folder, Loader2, 
-  Terminal, Hash, Video, ExternalLink, Activity
+  Terminal, Hash, Video, ExternalLink, Activity,
+  ChevronRight, ChevronDown, Monitor, Layout, Cpu
 } from "lucide-react";
 
 const supabase = createClient(
@@ -17,163 +18,93 @@ export default function AutomationDashboard() {
   const [builds, setBuilds] = useState<any[]>([]);
   const [selectedBuild, setSelectedBuild] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [expandedTests, setExpandedTests] = useState<string[]>([]); 
 
-  // Use useCallback to memoize the data fetching logic
   const loadData = useCallback(async (isInitial = false) => {
     try {
       if (isInitial) setLoading(true);
       const data = await getBuildHistory();
-      
       setBuilds(data);
-
       if (data?.length > 0) {
-        // We use a functional update to ensure we have the latest state 
-        // and maintain the user's selection during the background refresh
-        setSelectedBuild((currentSelected: any) => {
-          if (currentSelected) {
-            const updated = data.find((b: any) => b.id === currentSelected.id);
-            return updated || data[0];
-          }
-          return data[0];
+        setSelectedBuild((current: any) => {
+            const found = data.find((b: any) => b.id === (current?.id || data[0].id));
+            return found || data[0];
         });
       }
-    } catch (error) {
-      console.error("Failed to load builds:", error);
-    } finally {
-      if (isInitial) setLoading(false);
-    }
+    } catch (e) { console.error(e); } finally { if (isInitial) setLoading(false); }
   }, []);
 
-  // Effect 1: Handle the 2-second background refresh (Polling)
   useEffect(() => {
-    // Initial fetch with loading spinner
     loadData(true);
+    const interval = setInterval(() => { if (!document.hidden) loadData(false); }, 2000);
+    
+    const channel = supabase.channel('db-changes').on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'test_results' 
+    }, (payload) => {
+        const updatedSpec = payload.new;
+        setBuilds(curr => curr.map(b => b.id === updatedSpec.build_id ? 
+            {...b, results: b.results.map((r:any) => r.id === updatedSpec.id ? updatedSpec : r)} : b
+        ));
+        setSelectedBuild((prev: any) => prev?.id === updatedSpec.build_id ? 
+            {...prev, results: prev.results.map((r:any) => r.id === updatedSpec.id ? updatedSpec : r)} : prev
+        );
+    }).subscribe();
 
-    // Set up interval for background updates every 2 seconds
-    const intervalId = setInterval(() => {
-      // Only fetch if the tab is actually visible to the user
-      if (!document.hidden) {
-        loadData(false); // Silent refresh (no spinner)
-      }
-    }, 2000);
-
-    return () => clearInterval(intervalId);
+    return () => { clearInterval(interval); supabase.removeChannel(channel); };
   }, [loadData]);
 
-  // Effect 2: Supabase Realtime (For granular log updates between polls)
-  useEffect(() => {
-    const channel = supabase
-      .channel('schema-db-changes')
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'test_results' },
-        (payload) => {
-          setBuilds((currentBuilds) => 
-            currentBuilds.map((build) => {
-              if (build.id === payload.new.build_id) {
-                const updatedResults = build.results.map((spec: any) => 
-                  spec.id === payload.new.id ? payload.new : spec
-                );
-                const updatedBuild = { ...build, results: updatedResults };
-                
-                // Keep the detail view in sync with realtime logs
-                setSelectedBuild((prev: any) => 
-                  prev?.id === build.id ? updatedBuild : prev
-                );
-                
-                return updatedBuild;
-              }
-              return build;
-            })
-          );
-        }
-      )
-      .subscribe();
+  const toggleTest = (testId: string) => {
+    setExpandedTests(prev => prev.includes(testId) ? prev.filter(id => id !== testId) : [...prev, testId]);
+  };
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
-  const stats = selectedBuild?.results?.reduce((acc: any, spec: any) => {
-    spec.tests.forEach((t: any) => {
-      acc.total++;
-      if (t.status === 'passed' || t.status === 'expected') acc.passed++;
-      if (t.status === 'running') acc.running++;
-    });
-    return acc;
-  }, { total: 0, passed: 0, running: 0 }) || { total: 0, passed: 0, running: 0 };
-
-  if (loading) return (
-    <div className="flex-1 flex items-center justify-center bg-[#09090b] h-screen">
-      <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
-    </div>
-  );
+  if (loading) return <div className="h-screen flex items-center justify-center bg-[#09090b]"><Loader2 className="animate-spin text-indigo-500 w-8 h-8" /></div>;
 
   return (
-    <div className="flex h-screen bg-[#09090b] text-zinc-300">
+    <div className="flex h-screen bg-[#09090b] text-zinc-300 font-sans selection:bg-indigo-500/30">
+      {/* Sidebar */}
       <aside className="w-80 border-r border-white/5 overflow-y-auto bg-[#0b0b0d]">
-        <div className="p-5 border-b border-white/5 bg-black/20 font-black text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-          Execution Builds
-        </div>
-        {builds.map((build) => (
-          <button
-            key={build.id}
-            onClick={() => setSelectedBuild(build)}
-            className={`w-full text-left p-5 border-b border-white/5 transition-all ${
-              selectedBuild?.id === build.id ? 'bg-indigo-600/10 border-r-2 border-r-indigo-500' : 'hover:bg-white/5'
-            }`}
-          >
+        <div className="p-6 border-b border-white/5 font-black text-[10px] uppercase tracking-[0.2em] text-zinc-500">Build History</div>
+        {builds.map(b => (
+          <button key={b.id} onClick={() => setSelectedBuild(b)} className={`w-full text-left p-5 border-b border-white/5 transition-all ${selectedBuild?.id === b.id ? 'bg-indigo-600/10 border-r-2 border-r-indigo-500' : 'hover:bg-white/5'}`}>
             <div className="flex justify-between items-center mb-1">
-              <span className="text-sm font-black text-white uppercase tracking-tight">Build #{build.id}</span>
-              <StatusBadge status={build.status} />
+                <span className="text-sm font-black text-white">BUILD #{b.id}</span>
+                <StatusBadge status={b.status} />
             </div>
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] text-zinc-500 font-mono">{new Date(build.createdAt).toLocaleDateString()}</p>
-              <span className="text-[9px] text-zinc-600 font-bold uppercase">{build.environment}</span>
-            </div>
+            <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-tight">{new Date(b.createdAt).toLocaleString()}</p>
           </button>
         ))}
       </aside>
 
-      <main className="flex-1 overflow-y-auto p-10 bg-[#09090b]">
-        <header className="mb-12">
-          <div className="flex items-center gap-4 mb-4">
-            <div className="p-3 bg-indigo-500/10 rounded-xl border border-indigo-500/20">
-              <Hash className="w-6 h-6 text-indigo-500" />
+      {/* Main content */}
+      <main className="flex-1 overflow-y-auto p-10 space-y-12">
+        <header className="flex justify-between items-start">
+            <div className="space-y-1">
+                <div className="flex items-center gap-3">
+                    <h1 className="text-4xl font-black text-white tracking-tighter">Build #{selectedBuild?.id}</h1>
+                    <span className="px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded text-[9px] font-black text-indigo-400 uppercase tracking-widest">{selectedBuild?.environment}</span>
+                </div>
+                <p className="text-zinc-500 text-sm font-medium">Cross-browser execution overview</p>
             </div>
-            <div>
-              <div className="flex items-center gap-3">
-                <h1 className="text-3xl font-black text-white tracking-tight">Build #{selectedBuild?.id}</h1>
-                {stats.running > 0 && (
-                  <span className="flex items-center gap-1.5 px-2 py-1 bg-indigo-500/20 text-indigo-400 text-[10px] font-bold rounded-md animate-pulse">
-                    <Activity className="w-3 h-3" /> LIVE
-                  </span>
-                )}
-              </div>
-              <p className="text-zinc-500 text-sm font-medium">Platform: Playwright / Cypress Automation</p>
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <StatCard label="Tests" value={stats.total} color="text-indigo-400" />
-            <StatCard label="Passed" value={stats.passed} color="text-green-400" />
-            <StatCard label="Running" value={stats.running} color="text-yellow-500" />
-            <StatCard label="Failed" value={stats.total - stats.passed - stats.running} color="text-red-400" />
-          </div>
+            
+            {/* Live Indicator */}
+            {selectedBuild?.results?.some((r:any) => r.tests.some((t:any) => t.status === 'running')) && (
+                <div className="flex items-center gap-2 px-4 py-2 bg-indigo-500/5 border border-indigo-500/10 rounded-xl animate-pulse">
+                    <Activity className="w-4 h-4 text-indigo-500" />
+                    <span className="text-xs font-black text-indigo-500 uppercase tracking-widest">Live Syncing</span>
+                </div>
+            )}
         </header>
 
-        <div className="space-y-10">
+        <div className="space-y-16">
           {selectedBuild?.results?.map((spec: any) => (
-            <div key={spec.id} className="group">
-              <div className="flex items-center gap-3 mb-4 px-2">
-                <FileCode className="w-5 h-5 text-indigo-500/50" />
-                <h2 className="text-md font-bold text-zinc-100 font-mono">{spec.specFile}</h2>
-                <div className="h-px flex-1 bg-white/5 mx-4" />
-              </div>
-              <div className="bg-[#0c0c0e] border border-white/5 rounded-2xl p-6 shadow-2xl">
-                <RenderSuites tests={spec.tests} />
-              </div>
-            </div>
+            <SpecSection 
+                key={spec.id} 
+                spec={spec} 
+                expandedTests={expandedTests} 
+                onToggle={toggleTest} 
+            />
           ))}
         </div>
       </main>
@@ -181,167 +112,204 @@ export default function AutomationDashboard() {
   );
 }
 
-function RenderSuites({ tests }: { tests: any[] }) {
-  const groupedBySuite = tests.reduce((acc: any, test: any) => {
-    const suitePath = test.suites?.length > 0 ? test.suites.join("  ›  ") : "Root";
-    if (!acc[suitePath]) acc[suitePath] = [];
-    acc[suitePath].push(test);
+function SpecSection({ spec, expandedTests, onToggle }: any) {
+  // Group tests using the explicit "project" field from the JSONB array
+  const groupedByProject = spec.tests.reduce((acc: any, test: any) => {
+    const projectName = test.project || "Default";
+    if (!acc[projectName]) acc[projectName] = [];
+    acc[projectName].push(test);
     return acc;
   }, {});
 
   return (
-    <div className="space-y-12">
-      {Object.entries(groupedBySuite).map(([suitePath, suiteTests]: [string, any]) => (
-        <div key={suitePath}>
-          <div className="flex items-center gap-3 mb-6">
-            <Folder className="w-4 h-4 text-zinc-600" />
-            <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400">{suitePath}</h3>
-          </div>
-          <div className="ml-2 pl-8 border-l border-white/5 space-y-8">
-            {suiteTests.map((test: any, idx: number) => (
-              <TestRow key={idx} test={test} />
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TestRow({ test }: { test: any }) {
-  return (
-    <div className="group">
-      <div className="flex items-center justify-between py-2 px-3 rounded-xl hover:bg-white/[0.03] border border-transparent hover:border-white/5 transition-all">
-        <div className="flex items-center gap-4">
-          {test.status === 'running' ? (
-            <Loader2 className="w-4 h-4 text-indigo-500 animate-spin" />
-          ) : (test.status === 'passed' || test.status === 'expected') ? (
-            <CheckCircle2 className="w-4 h-4 text-green-500" />
-          ) : (
-            <XCircle className="w-4 h-4 text-red-500" />
-          )}
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] font-black text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-md">
-              {test.case_code || 'N/A'}
-            </span>
-            <span className={`text-sm font-semibold transition-colors ${test.status === 'running' ? 'text-indigo-400 animate-pulse' : 'text-zinc-300 group-hover:text-white'}`}>
-              {test.title}
-            </span>
-          </div>
-        </div>
-        <span className="text-[10px] font-mono text-zinc-600">{test.duration || '--'}</span>
+    <div className="space-y-6">
+      <div className="flex items-center gap-3 px-2 border-l-2 border-indigo-500/30 pl-4">
+        <FileCode className="w-5 h-5 text-indigo-500/50" />
+        <h2 className="text-md font-mono font-bold text-zinc-100">{spec.specFile}</h2>
       </div>
 
-      {(test.logs && test.logs.length > 0 || test.status === 'running') && (
-        <LogTerminal logs={test.logs || []} status={test.status} />
-      )}
+      <div className="grid grid-cols-1 gap-8">
+        {Object.entries(groupedByProject).map(([projectName, tests]: [string, any]) => (
+            <div key={projectName} className="bg-[#0c0c0e] border border-white/5 rounded-3xl overflow-hidden shadow-2xl">
+                {/* Project Header */}
+                <div className="bg-white/[0.03] px-8 py-5 border-b border-white/5 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
+                            <Cpu className="w-5 h-5 text-indigo-500" />
+                        </div>
+                        <div>
+                            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 leading-none block mb-1">Project Environment</span>
+                            <span className="text-lg font-black text-white tracking-tight">{projectName}</span>
+                        </div>
+                    </div>
+                    <ProjectSummary tests={tests} />
+                </div>
 
-      {test.video_url && (
-        <div className="mt-4 ml-12 space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1.5 px-2 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-md text-[9px] font-black uppercase tracking-widest text-indigo-400">
-              <Video className="w-3 h-3" /> Recording
-            </span>
-            <a 
-              href={test.video_url} 
-              target="_blank" 
-              className="p-1 hover:bg-white/5 rounded text-zinc-500 hover:text-white transition-colors"
-            >
-              <ExternalLink className="w-3 h-3" />
-            </a>
-          </div>
-          <video controls preload="none" className="w-full max-w-xl rounded-xl border border-white/10 shadow-2xl bg-black aspect-video">
-            <source src={test.video_url} type="video/webm" />
-          </video>
-        </div>
-      )}
+                {/* Tests List */}
+                <div className="divide-y divide-white/5">
+                    {tests.map((test: any, idx: number) => {
+                        // Unique ID for accordion: SpecID + ProjectName + TestTitle
+                        const testId = `${spec.id}-${projectName}-${test.title}`;
+                        const isExpanded = expandedTests.includes(testId);
 
-      {test.status === 'failed' && (
-        <div className="mt-3 ml-12 p-4 bg-red-500/[0.03] border border-red-500/10 rounded-xl">
-          <div className="flex gap-3">
-            <Terminal className="w-4 h-4 text-red-500 shrink-0 mt-1" />
-            <code className="text-[11px] text-red-400/90 leading-relaxed font-mono whitespace-pre-wrap block">
-              {test.error}
-            </code>
-          </div>
-        </div>
-      )}
+                        return (
+                            <div key={idx} className={`transition-all ${isExpanded ? 'bg-white/[0.02]' : 'hover:bg-white/[0.01]'}`}>
+                                <button 
+                                    onClick={() => onToggle(testId)}
+                                    className="w-full flex items-center justify-between px-8 py-5 text-left group"
+                                >
+                                    <div className="flex items-center gap-5">
+                                        <div className="relative">
+                                            {test.status === 'running' ? (
+                                                <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
+                                            ) : test.status === 'passed' ? (
+                                                <CheckCircle2 className="w-5 h-5 text-green-500/80" />
+                                            ) : (
+                                                <XCircle className="w-5 h-5 text-red-500/80" />
+                                            )}
+                                        </div>
+                                        
+                                        <div className="flex flex-col">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <span className="text-[10px] font-black text-indigo-500/60 bg-indigo-500/5 px-1.5 py-0.5 rounded leading-none">
+                                                    {test.case_code || 'TC-N/A'}
+                                                </span>
+                                                <span className="text-[10px] font-mono text-zinc-600 uppercase tracking-tighter">
+                                                    {test.duration || '0.00s'}
+                                                </span>
+                                            </div>
+                                            <span className={`text-[15px] font-bold tracking-tight leading-snug ${test.status === 'running' ? 'text-indigo-400 animate-pulse' : 'text-zinc-200'}`}>
+                                                {test.title}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="flex items-center gap-4">
+                                        {isExpanded ? <ChevronDown className="w-5 h-5 text-zinc-700" /> : <ChevronRight className="w-5 h-5 text-zinc-700 group-hover:text-zinc-500" />}
+                                    </div>
+                                </button>
+
+                                {/* Expanded Content */}
+                                {isExpanded && (
+                                    <div className="px-8 pb-8 pt-2 space-y-8 animate-in fade-in slide-in-from-top-2 duration-300">
+                                        
+                                        {/* Console Logs */}
+                                        {(test.logs?.length > 0 || test.status === 'running') && (
+                                            <div className="space-y-3">
+                                                <div className="flex items-center gap-2 text-zinc-500 px-1">
+                                                    <Terminal className="w-3 h-3" />
+                                                    <span className="text-[9px] font-black uppercase tracking-widest">Realtime Logs</span>
+                                                </div>
+                                                <LogTerminal logs={test.logs || []} status={test.status} />
+                                            </div>
+                                        )}
+
+                                        {/* Video Recording */}
+                                        <div className="space-y-3">
+                                            <div className="flex items-center gap-2 text-zinc-500 px-1">
+                                                <Video className="w-3 h-3" />
+                                                <span className="text-[9px] font-black uppercase tracking-widest">Recording</span>
+                                            </div>
+                                            {test.video_url ? (
+                                                <div className="relative group/vid max-w-3xl">
+                                                    <video controls className="w-full rounded-2xl border border-white/10 bg-black shadow-2xl aspect-video">
+                                                        <source src={test.video_url} type="video/webm" />
+                                                    </video>
+                                                    <a href={test.video_url} target="_blank" className="absolute top-4 right-4 p-2 bg-black/50 hover:bg-black rounded-lg text-white opacity-0 group-hover/vid:opacity-100 transition-opacity">
+                                                        <ExternalLink className="w-4 h-4" />
+                                                    </a>
+                                                </div>
+                                            ) : (
+                                                <div className="aspect-video max-w-3xl bg-white/[0.02] border border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center gap-2">
+                                                    <Video className="w-8 h-8 text-zinc-800" />
+                                                    <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">
+                                                        {test.status === 'running' ? 'Recording in progress...' : 'No recording available'}
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Error Trace */}
+                                        {test.status === 'failed' && test.error && (
+                                            <div className="space-y-3">
+                                                <div className="flex items-center gap-2 text-red-500/50 px-1">
+                                                    <XCircle className="w-3 h-3" />
+                                                    <span className="text-[9px] font-black uppercase tracking-widest">Failure Trace</span>
+                                                </div>
+                                                <div className="p-5 bg-red-500/[0.02] border border-red-500/10 rounded-2xl">
+                                                    <code className="text-[11px] text-red-400/80 font-mono whitespace-pre-wrap block leading-relaxed">
+                                                        {test.error}
+                                                    </code>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 function LogTerminal({ logs, status }: { logs: string[], status: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [logs]);
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [logs]);
 
   return (
-    <div className="mt-4 ml-12 overflow-hidden rounded-lg border border-white/5 bg-[#050505] shadow-2xl">
-      <div className="flex items-center justify-between border-b border-white/5 bg-white/5 px-3 py-1.5">
-        <div className="flex items-center gap-2">
-          <Terminal className="w-3 h-3 text-zinc-500" />
-          <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">Worker Output</span>
-        </div>
+    <div className="rounded-2xl border border-white/5 bg-[#050505] overflow-hidden shadow-inner">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 bg-white/[0.02]">
         <div className="flex gap-1.5">
-          <div className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
-          <div className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
-          <div className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
+            <div className="w-2 h-2 rounded-full bg-red-500/20" />
+            <div className="w-2 h-2 rounded-full bg-yellow-500/20" />
+            <div className="w-2 h-2 rounded-full bg-green-500/20" />
         </div>
+        <span className="text-[9px] font-mono text-zinc-600">sh — 80x24</span>
       </div>
-
-      <div 
-        ref={scrollRef}
-        className="max-h-60 overflow-y-auto p-3 font-mono text-[10px] leading-relaxed scroll-smooth custom-scrollbar"
-      >
-        {logs.length === 0 && status === 'running' && (
-          <div className="text-zinc-600 italic">Initializing worker and starting test...</div>
-        )}
-        {logs.map((log, i) => {
-          const isError = /error|failed|exception|❌/i.test(log);
-          const isSuccess = /success|passed|✅/i.test(log);
-          
-          return (
-            <div key={i} className="flex gap-2 mb-0.5 group">
-              <span className="text-zinc-700 select-none">{i + 1}</span>
-              <span className="text-indigo-900 select-none">›</span>
-              <span className={`whitespace-pre-wrap ${isError ? 'text-red-400' : isSuccess ? 'text-green-400' : 'text-zinc-400'}`}>
+      <div ref={scrollRef} className="p-5 font-mono text-[11px] max-h-64 overflow-y-auto leading-relaxed scroll-smooth custom-scrollbar">
+        {logs.map((log, i) => (
+          <div key={i} className="flex gap-4 mb-1 group">
+            <span className="text-zinc-800 select-none w-4 text-right italic">{i+1}</span>
+            <span className={/error|failed/i.test(log) ? 'text-red-400' : /✅|success|passed/i.test(log) ? 'text-green-400' : 'text-zinc-400'}>
                 {log}
-              </span>
-            </div>
-          );
-        })}
-        {status === 'running' && (
-          <div className="flex gap-2 items-center">
-             <span className="text-zinc-700 select-none">{logs.length + 1}</span>
-             <span className="text-indigo-900 select-none">›</span>
-             <span className="w-1.5 h-3 bg-indigo-500 animate-pulse inline-block" />
+            </span>
           </div>
+        ))}
+        {status === 'running' && (
+            <div className="flex gap-4 items-center mt-1">
+                <span className="text-zinc-800 select-none w-4 text-right italic">{logs.length + 1}</span>
+                <div className="w-2 h-4 bg-indigo-500 animate-pulse" />
+            </div>
         )}
       </div>
     </div>
   );
+}
+
+function ProjectSummary({ tests }: { tests: any[] }) {
+    const passed = tests.filter(t => t.status === 'passed').length;
+    const failed = tests.filter(t => t.status === 'failed').length;
+    const running = tests.filter(t => t.status === 'running').length;
+
+    return (
+        <div className="flex gap-4">
+            <div className="flex flex-col items-end">
+                <span className="text-[9px] font-black text-zinc-600 uppercase tracking-tighter">Results</span>
+                <div className="flex gap-3 mt-1">
+                    {running > 0 && <span className="text-[10px] font-black text-indigo-400 animate-pulse">{running} RUNNING</span>}
+                    <span className="text-[10px] font-black text-green-500">{passed} PASSED</span>
+                    <span className="text-[10px] font-black text-red-500">{failed} FAILED</span>
+                </div>
+            </div>
+        </div>
+    );
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const isFailed = status === 'failed';
-  return (
-    <span className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest ${
-      isFailed ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'
-    }`}>
-      {status}
-    </span>
-  );
-}
-
-function StatCard({ label, value, color }: { label: string, value: number, color: string }) {
-  return (
-    <div className="bg-[#111113] border border-white/5 px-6 py-3 rounded-2xl min-w-[120px]">
-      <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1">{label}</p>
-      <p className={`text-2xl font-black ${color}`}>{value}</p>
-    </div>
-  );
+  const colors = status === 'failed' ? 'text-red-500' : status === 'passed' ? 'text-green-500' : 'text-yellow-500';
+  return <span className={`text-[10px] font-black uppercase tracking-widest ${colors}`}>{status}</span>;
 }
