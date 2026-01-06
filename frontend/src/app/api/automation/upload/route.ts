@@ -1,71 +1,52 @@
 import { NextResponse } from 'next/server';
 
-// 1. Increase the execution timeout (Essential for large file uploads)
-// Note: On Vercel Hobby, max is 10s. Pro is up to 300s.
 export const maxDuration = 60; 
-export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   try {
-    // 2. Check content length before processing to catch 413 early
-    const contentLength = req.headers.get('content-length');
-    const sizeInMB = contentLength ? (parseInt(contentLength) / (1024 * 1024)).toFixed(2) : "Unknown";
-    
-    console.log(`📥 Incoming upload request. Size: ${sizeInMB} MB`);
-
-    // 3. Parse FormData
     const formData = await req.formData();
     const file = formData.get('file') as File;
     const buildId = formData.get('buildId');
 
-    if (!file) {
-      return NextResponse.json({ error: "No file found in request" }, { status: 400 });
+    if (!file || file.size === 0) {
+      return NextResponse.json({ error: "File is empty" }, { status: 400 });
     }
 
-    // 4. Prepare data for Discord
-    // We recreate the FormData to ensure a clean stream to Discord
-    const discordPayload = new FormData();
-    discordPayload.append('file', file, file.name);
-    discordPayload.append('content', `📹 **Recording for Build #${buildId}**\nFile: \`${file.name}\` (${sizeInMB} MB)`);
+    const apiKey = process.env.PIXELDRAIN_API_KEY;
+    const auth = Buffer.from(`:${apiKey}`).toString('base64');
 
-    console.log(`🚀 Forwarding to Discord Webhook...`);
+    // 1. Ensure the filename has the correct extension for streaming
+    const safeFileName = file.name.endsWith('.webm') ? file.name : `${file.name}.webm`;
 
-    // 5. Send to Discord Webhook
-    const discordResponse = await fetch(process.env.DISCORD_WEBHOOK_URL!, {
-      method: 'POST',
-      body: discordPayload,
-      // Increase timeout for the fetch call itself
-      signal: AbortSignal.timeout(50000), 
-    });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const pixelForm = new FormData();
+        pixelForm.append('file', file);
+        pixelForm.append('name', safeFileName); // Explicit name help headers
 
-    if (!discordResponse.ok) {
-      const errorText = await discordResponse.text();
-      
-      // Handle Discord's specific 413 (File over 25MB)
-      if (discordResponse.status === 413) {
-        throw new Error("Discord rejected the upload: File exceeds Discord's 25MB limit.");
+        const pixelResponse = await fetch('https://pixeldrain.com/api/file', {
+          method: 'POST',
+          body: pixelForm,
+          headers: { 'Authorization': `Basic ${auth}` },
+          signal: AbortSignal.timeout(45000), 
+        });
+
+        const pixelData = await pixelResponse.json();
+
+        if (pixelResponse.ok && pixelData.success) {
+          // 🔥 FIX: Return the CLEAN URL without ?download=0
+          const videoUrl = `https://pixeldrain.com/api/file/${pixelData.id}`;
+          console.log(`✅ Pixeldrain Linked: ${videoUrl}`);
+          
+          return NextResponse.json({ videoUrl });
+        }
+      } catch (error: any) {
+        if (attempt === 3) throw error;
+        await new Promise(r => setTimeout(r, 1000));
       }
-      
-      throw new Error(`Discord API Error (${discordResponse.status}): ${errorText}`);
     }
-
-    const discordData = await discordResponse.json();
-
-    // 6. Get the direct URL from Discord's CDN
-    const videoUrl = discordData.attachments[0].url;
-    console.log(`✅ Upload successful: ${videoUrl}`);
-
-    return NextResponse.json({ videoUrl });
   } catch (error: any) {
-    console.error("❌ Discord Upload Error:", error.message);
-    
-    // If the error is a 413 from the server/gateway
-    if (error.message.includes('fetch failed') || error.message.includes('large')) {
-        return NextResponse.json({ 
-            error: "Payload Too Large: The video file exceeds the server limit." 
-        }, { status: 413 });
-    }
-
+    console.error("❌ Upload API Error:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
