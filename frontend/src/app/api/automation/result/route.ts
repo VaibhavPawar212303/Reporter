@@ -8,23 +8,26 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { build_id, spec_file, test_entry, log_chunk } = body;
 
-    // 1. Verify the Build exists
+    // 1. Verify the Build exists (Foreign Key Check)
     const buildExists = await db.query.automationBuilds.findFirst({
       where: eq(automationBuilds.id, build_id),
     });
 
     if (!buildExists) {
+      console.error(`❌ Build ID ${build_id} not found in Database.`);
       return NextResponse.json({ error: `Build ID ${build_id} not found.` }, { status: 400 });
     }
 
-    // 2. Clean ANSI colors from errors and logs
+    // 2. Utility to clean terminal color codes (ANSI)
     const cleanText = (text: string) => text?.replace(/\u001b\[\d+m/g, '') || '';
     
+    // Sanitize incoming error and log chunk
     if (test_entry.error) test_entry.error = cleanText(test_entry.error);
     const sanitizedLog = log_chunk ? cleanText(log_chunk) : null;
 
-    // 3. Use a Transaction to handle concurrency (4+ workers) safely
+    // 3. Start Transaction: Critical for multiple parallel workers
     return await db.transaction(async (tx) => {
+      // Find the row for this specific Spec file in this Build
       const existingRecord = await tx.query.testResults.findFirst({
         where: and(
           eq(testResults.buildId, build_id),
@@ -34,6 +37,7 @@ export async function POST(req: Request) {
 
       let updatedTests = existingRecord ? (existingRecord.tests as any[]) : [];
       
+      // Identify the specific test using BOTH Title and Project
       const testIndex = updatedTests.findIndex((t) => 
         t.title === test_entry.title && 
         t.project === test_entry.project
@@ -44,24 +48,24 @@ export async function POST(req: Request) {
         const existingTest = updatedTests[testIndex];
         
         updatedTests[testIndex] = {
-          ...existingTest,
-          ...test_entry, 
+          ...existingTest, // Preserve existing data (like early logs)
+          ...test_entry,   // Apply new data (status, duration, error)
           
-          // 🔥 FIX: Persist Video URL
-          // If the incoming test_entry has a null video_url, but the DB already has one, 
-          // we KEEP the existing one. This prevents logs from overwriting video links.
+          // 🔥 PROTECTION: Keep the video URL if it was already saved
+          // This prevents a late log update from overwriting a valid URL with null
           video_url: test_entry.video_url || existingTest.video_url || null,
           
-          // 🔥 FIX: Persist Run Number
+          // 🔥 PROTECTION: Maintain the run/retry number
           run_number: test_entry.run_number || existingTest.run_number || 1,
 
-          // Append logs
+          // 🔥 PROTECTION: Append logs safely
           logs: sanitizedLog 
             ? [...(existingTest.logs || []), sanitizedLog] 
             : (existingTest.logs || [])
         };
       } else {
         // --- INSERT NEW TEST ---
+        // Initialize the test object in the array for the first time
         updatedTests.push({
           ...test_entry,
           logs: sanitizedLog ? [sanitizedLog] : []
@@ -69,11 +73,13 @@ export async function POST(req: Request) {
       }
 
       // 4. Atomic Upsert
+      // This uses the unique constraint on (build_id, spec_file)
       await tx.insert(testResults)
         .values({
           buildId: build_id,
           specFile: spec_file,
           tests: updatedTests,
+          executedAt: new Date(),
         })
         .onConflictDoUpdate({
           target: [testResults.buildId, testResults.specFile],
@@ -84,7 +90,7 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    console.error("❌ DATABASE ERROR:", error.message);
+    console.error("❌ API TRANSACTION ERROR:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
