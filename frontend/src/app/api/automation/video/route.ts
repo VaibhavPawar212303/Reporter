@@ -1,16 +1,16 @@
-import { NextRequest } from 'next/server';
 import axios from 'axios';
 import https from 'https';
+import { NextRequest } from 'next/server';
 
 export const dynamic = 'force-dynamic';
-// Vercel execution limit (Hobby is 10s, Pro is up to 300s)
+// Vercel/Next.js max execution time
 export const maxDuration = 60; 
 
-// 🔥 THE FIX: Force IPv4 and keep connections alive
-const agent = new https.Agent({
-  keepAlive: true,
-  family: 4, // 4 = Force IPv4. Prevents the "connect ETIMEDOUT" caused by slow IPv6 lookups.
-  timeout: 60000,
+// Optimized agent to prevent socket exhaustion
+const agent = new https.Agent({ 
+    keepAlive: true, 
+    maxSockets: 100, // Handle more simultaneous requests
+    family: 4 
 });
 
 export async function GET(req: NextRequest) {
@@ -18,24 +18,26 @@ export async function GET(req: NextRequest) {
   const fileId = searchParams.get('id');
   const apiKey = process.env.PIXELDRAIN_API_KEY;
 
-  if (!fileId) return new Response("Missing ID", { status: 400 });
-  if (!apiKey) return new Response("API Key not set", { status: 500 });
+  if (!fileId || !apiKey) return new Response("Error: Missing Data", { status: 400 });
 
   try {
     const auth = Buffer.from(`:${apiKey}`).toString('base64');
     
-    console.log(`📡 [Proxy] Connecting to Pixeldrain (IPv4): ${fileId}`);
-
     const response = await axios({
       method: 'get',
       url: `https://pixeldrain.com/api/file/${fileId}`,
       headers: { 'Authorization': `Basic ${auth}` },
-      responseType: 'stream', // 🔥 Stream the bytes directly
-      httpsAgent: agent,      // Use the optimized IPv4 agent
-      timeout: 30000,         // 30s timeout for the connection
+      responseType: 'stream',
+      httpsAgent: agent,
+      // Increase timeout to 2 minutes for large videos
+      timeout: 120000, 
     });
 
-    // Convert the Axios Node stream to a Web ReadableStream for Next.js Response
+    // Extract useful headers from Pixeldrain
+    const contentType = response.headers['content-type'] || 'video/webm';
+    const contentLength = response.headers['content-length'];
+
+    // Convert Node stream to Web stream for Next.js Response
     const stream = new ReadableStream({
       start(controller) {
         response.data.on('data', (chunk: any) => controller.enqueue(chunk));
@@ -43,26 +45,21 @@ export async function GET(req: NextRequest) {
         response.data.on('error', (err: any) => controller.error(err));
       },
       cancel() {
-        response.data.destroy();
+        response.data.destroy(); // Clean up if user closes browser
       }
     });
 
     return new Response(stream, {
       headers: {
-        'Content-Type': 'video/webm',
-        'Accept-Ranges': 'bytes', // Essential for the video seek bar
-        'Content-Length': response.headers['content-length'] || '',
-        'Cache-Control': 'public, max-age=3600',
+        'Content-Type': contentType,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': contentLength || '',
+        'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
       },
     });
 
   } catch (error: any) {
-    console.error("❌ [Proxy Error]:", error.message);
-    
-    if (error.code === 'ETIMEDOUT') {
-      return new Response("Storage provider connection timed out", { status: 504 });
-    }
-
-    return new Response("Failed to stream video", { status: 500 });
+    console.error("❌ Proxy error:", error.message);
+    return new Response(`Proxy error: ${error.message}`, { status: 500 });
   }
 }

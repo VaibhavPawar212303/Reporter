@@ -234,29 +234,31 @@ export default function AutomationDashboard() {
                                   <span className="text-[9px] font-black uppercase tracking-widest">Execution Recording</span>
                                 </div>
                                 {test.video_url && (
-                                  <a 
-                                    href={`/api/automation/video?id=${test.video_url.split('/').pop()?.split('?')[0]}`} 
-                                    target="_blank" 
+                                  <a
+                                    href={`/api/automation/video?id=${test.video_url.split('/').pop()?.split('?')[0]}`}
+                                    target="_blank"
                                     className="flex items-center gap-1 text-[9px] font-black text-indigo-500 hover:text-indigo-400 uppercase transition-colors"
                                   >
                                     <ExternalLink className="w-3 h-3" /> Open Stream
                                   </a>
                                 )}
                               </div>
-                              
+
                               {test.video_url ? (
                                 <div className="relative group/vid max-w-3xl">
                                   <video
-                                    key={test.video_url} // Forces remount when URL arrives
+                                    key={test.video_url}
                                     controls
-                                    preload="metadata"
+                                    // 🔥 CHANGE: Use 'none' to prevent the browser from loading 
+                                    // every video in the list automatically. It will only load when you click Play.
+                                    preload="none"
                                     playsInline
                                     className="w-full rounded-2xl border border-white/10 bg-black shadow-2xl aspect-video"
+                                  // Add a poster image (optional) to make it look good while not loaded
                                   >
-                                    {/* Clean extract of the ID from the Pixeldrain URL */}
-                                    <source 
-                                      src={`/api/automation/video?id=${test.video_url.split('/').pop()?.split('?')[0]}`} 
-                                      type="video/webm" 
+                                    <source
+                                      src={`/api/automation/video?id=${test.video_url.split('/').pop()}`}
+                                      type="video/webm"
                                     />
                                     Your browser does not support the video tag.
                                   </video>
