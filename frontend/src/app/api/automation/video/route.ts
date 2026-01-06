@@ -1,3 +1,4 @@
+// app/api/automation/video/route.ts
 import axios from 'axios';
 import https from 'https';
 
@@ -8,7 +9,7 @@ export async function GET(req: Request) {
   const fileId = searchParams.get('id');
   const apiKey = process.env.PIXELDRAIN_API_KEY;
 
-  if (!fileId) return new Response("Missing ID", { status: 400 });
+  if (!fileId || !apiKey) return new Response("Error", { status: 400 });
 
   try {
     const auth = Buffer.from(`:${apiKey}`).toString('base64');
@@ -24,11 +25,11 @@ export async function GET(req: Request) {
       headers: {
         'Content-Type': 'video/webm',
         'Accept-Ranges': 'bytes',
-        'Cache-Control': 'no-cache',
+        'Content-Length': response.headers['content-length'], // 🔥 Helps the browser player
+        'Cache-Control': 'public, max-age=3600',
       },
     });
   } catch (error: any) {
-    console.error("Proxy error:", error.message);
-    return new Response("Video stream failed", { status: 500 });
+    return new Response("Streaming failed", { status: 500 });
   }
 }
