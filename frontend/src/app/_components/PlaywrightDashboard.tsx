@@ -248,24 +248,17 @@ export default function AutomationDashboard() {
                               {test.video_url ? (
                                 <div className="relative group/vid max-w-3xl">
                                   <video
-                                    // We use the ID as a key to force re-render
                                     key={test.video_url}
                                     controls
                                     preload="metadata"
-                                    playsInline
-                                    className="w-full rounded-2xl border border-white/10 bg-black shadow-2xl aspect-video"
+                                    className="..."
                                   >
-                                    {/* 
-           🔥 WE POINT TO OUR PROXY INSTEAD OF PIXELDRAIN DIRECTLY 
-           Example: /api/automation/video?id=jy1GoiuB
-        */}
+                                    {/* Extract the Pixeldrain ID and route through your proxy */}
                                     <source
                                       src={`/api/automation/video?id=${test.video_url.split('/').pop()}`}
                                       type="video/webm"
                                     />
-                                    Your browser does not support the video tag.
                                   </video>
-
                                   <div className="mt-2 flex justify-end">
                                     <a
                                       href={`/api/automation/video?id=${test.video_url.split('/').pop()}`}
