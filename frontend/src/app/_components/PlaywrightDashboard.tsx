@@ -7,7 +7,7 @@ import {
   CheckCircle2, XCircle, FileCode, Loader2,
   Terminal, Hash, Video, ExternalLink, Activity,
   ChevronRight, ChevronDown, Cpu, ListFilter, Search,
-  Monitor, PlayCircle
+  PlayCircle
 } from "lucide-react";
 
 const supabase = createClient(
@@ -58,7 +58,6 @@ export default function AutomationDashboard() {
     return () => { clearInterval(interval); supabase.removeChannel(channel); };
   }, [loadData]);
 
-  // 🔥 1. Aggregate Build-Wide Stats
   const buildStats = useMemo(() => {
     const stats = { total: 0, passed: 0, failed: 0, running: 0 };
     selectedBuild?.results?.forEach((spec: any) => {
@@ -72,7 +71,6 @@ export default function AutomationDashboard() {
     return stats;
   }, [selectedBuild]);
 
-  // 🔥 2. Get Unique Project List for Dropdown
   const projectList = useMemo(() => {
     const projects = new Set<string>();
     selectedBuild?.results?.forEach((spec: any) => {
@@ -81,21 +79,18 @@ export default function AutomationDashboard() {
     return Array.from(projects).sort();
   }, [selectedBuild]);
 
-  // 🔥 3. Flatten, Filter, and Group Logic
   const filteredAggregatedProjects = useMemo(() => {
     return selectedBuild?.results?.reduce((acc: any, spec: any) => {
       spec.tests.forEach((test: any) => {
         const projectName = test.project || "Default";
-
         const matchesStatus = filterStatus === 'all' ||
           (filterStatus === 'passed' && (test.status === 'passed' || test.status === 'expected')) ||
           (filterStatus === 'failed' && test.status === 'failed') ||
           (filterStatus === 'running' && test.status === 'running');
+        const matchesProjectSearch = projectName.toLowerCase().includes(projectSearch.toLowerCase());
+        const matchesProjectDropdown = selectedProjectFilter === 'all' || selectedProjectFilter === projectName;
 
-        const matchesSearch = projectName.toLowerCase().includes(projectSearch.toLowerCase());
-        const matchesDropdown = selectedProjectFilter === 'all' || selectedProjectFilter === projectName;
-
-        if (matchesStatus && matchesSearch && matchesDropdown) {
+        if (matchesStatus && matchesProjectSearch && matchesProjectDropdown) {
           if (!acc[projectName]) acc[projectName] = [];
           acc[projectName].push({ ...test, specFile: spec.specFile, specId: spec.id });
         }
@@ -110,9 +105,8 @@ export default function AutomationDashboard() {
 
   return (
     <div className="flex h-screen bg-[#09090b] text-zinc-300 font-sans selection:bg-indigo-500/30">
-      {/* Sidebar */}
       <aside className="w-80 border-r border-white/5 overflow-y-auto bg-[#0b0b0d]">
-        <div className="p-6 border-b border-white/5 font-black text-[10px] uppercase tracking-[0.2em] text-zinc-500">History</div>
+        <div className="p-6 border-b border-white/5 font-black text-[10px] uppercase tracking-[0.2em] text-zinc-500">Execution History</div>
         {builds.map(b => (
           <button key={b.id} onClick={() => { setSelectedBuild(b); setFilterStatus('all'); }} className={`w-full text-left p-5 border-b border-white/5 transition-all ${selectedBuild?.id === b.id ? 'bg-indigo-600/10 border-r-2 border-r-indigo-500' : 'hover:bg-white/5'}`}>
             <div className="flex justify-between items-center mb-1">
@@ -124,8 +118,7 @@ export default function AutomationDashboard() {
         ))}
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto p-10 space-y-10 bg-[#09090b]">
+      <main className="flex-1 overflow-y-auto p-10 space-y-10">
         <header className="flex flex-col gap-8">
           <div className="flex justify-between items-start">
             <div className="space-y-1">
@@ -133,17 +126,15 @@ export default function AutomationDashboard() {
                 <h1 className="text-4xl font-black text-white tracking-tighter">Build #{selectedBuild?.id}</h1>
                 <span className="px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded text-[9px] font-black text-indigo-400 uppercase tracking-widest">{selectedBuild?.environment}</span>
               </div>
-              <p className="text-zinc-500 text-sm">Reviewing execution across {projectList.length} environment(s)</p>
             </div>
             {buildStats.running > 0 && (
               <div className="flex items-center gap-2 px-4 py-2 bg-indigo-500/5 border border-indigo-500/10 rounded-xl animate-pulse">
                 <Activity className="w-4 h-4 text-indigo-500" />
-                <span className="text-xs font-black text-indigo-500 uppercase tracking-widest">Live Sync</span>
+                <span className="text-xs font-black text-indigo-500 uppercase tracking-widest">Live Syncing</span>
               </div>
             )}
           </div>
 
-          {/* Combined Filter Bar */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="flex items-center gap-2 bg-[#111113] border border-white/5 p-2 rounded-2xl overflow-x-auto scrollbar-hide">
               <FilterButton active={filterStatus === 'all'} label="All" count={buildStats.total} onClick={() => setFilterStatus('all')} color="zinc" />
@@ -158,14 +149,14 @@ export default function AutomationDashboard() {
                 <input
                   value={projectSearch}
                   onChange={(e) => setProjectSearch(e.target.value)}
-                  placeholder="Filter by project name..."
+                  placeholder="Search project..."
                   className="bg-transparent border-none focus:ring-0 text-sm py-2 w-full text-zinc-300 placeholder:text-zinc-600 outline-none"
                 />
               </div>
               <select
                 value={selectedProjectFilter}
                 onChange={(e) => setSelectedProjectFilter(e.target.value)}
-                className="bg-black/40 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest px-4 py-2 focus:ring-indigo-500 text-zinc-400 outline-none cursor-pointer"
+                className="bg-black/40 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest px-4 py-2 focus:ring-indigo-500 text-zinc-400 outline-none"
               >
                 <option value="all">All Projects</option>
                 {projectList.map(p => <option key={p} value={p}>{p}</option>)}
@@ -174,15 +165,8 @@ export default function AutomationDashboard() {
           </div>
         </header>
 
-        {/* Dynamic Project Grid */}
         <div className="space-y-12 pb-20">
-          {sortedProjectNames.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-32 bg-[#0c0c0e] rounded-3xl border border-dashed border-white/5 text-center">
-              <Hash className="w-12 h-12 text-zinc-800 mb-4" />
-              <p className="text-zinc-500 font-bold uppercase text-[10px] tracking-widest">No matching results found</p>
-              <button onClick={() => { setFilterStatus('all'); setProjectSearch(''); setSelectedProjectFilter('all'); }} className="mt-4 text-indigo-500 text-[10px] font-black uppercase tracking-widest hover:underline">Reset Filters</button>
-            </div>
-          ) : sortedProjectNames.map((projectName) => {
+          {sortedProjectNames.map((projectName) => {
             const tests = filteredAggregatedProjects[projectName];
             const isProjectRunning = tests.some((t: any) => t.status === 'running');
 
@@ -194,7 +178,7 @@ export default function AutomationDashboard() {
                       <Cpu className={`w-6 h-6 ${isProjectRunning ? 'text-indigo-400' : 'text-zinc-500'}`} />
                     </div>
                     <div>
-                      <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 block mb-1">Project</span>
+                      <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 block mb-1">Project Environment</span>
                       <span className="text-xl font-black text-white tracking-tight">{projectName}</span>
                     </div>
                   </div>
@@ -233,7 +217,7 @@ export default function AutomationDashboard() {
 
                         {isExpanded && (
                           <div className="px-8 pb-8 pt-2 space-y-8 animate-in fade-in slide-in-from-top-2 duration-300">
-                            {/* Logs Container */}
+                            {/* Logs */}
                             <div className="space-y-3">
                               <div className="flex items-center gap-2 text-zinc-500 px-1">
                                 <Terminal className="w-3 h-3" />
@@ -241,49 +225,53 @@ export default function AutomationDashboard() {
                               </div>
                               <LogTerminal logs={test.logs || []} status={test.status} />
                             </div>
-                            {/* Find the video section inside your test mapping loop */}
+
+                            {/* Video Section */}
                             <div className="space-y-3">
+                              <div className="flex items-center justify-between px-1">
+                                <div className="flex items-center gap-2 text-zinc-500">
+                                  <Video className="w-3 h-3" />
+                                  <span className="text-[9px] font-black uppercase tracking-widest">Execution Recording</span>
+                                </div>
+                                {test.video_url && (
+                                  <a 
+                                    href={`/api/automation/video?id=${test.video_url.split('/').pop()?.split('?')[0]}`} 
+                                    target="_blank" 
+                                    className="flex items-center gap-1 text-[9px] font-black text-indigo-500 hover:text-indigo-400 uppercase transition-colors"
+                                  >
+                                    <ExternalLink className="w-3 h-3" /> Open Stream
+                                  </a>
+                                )}
+                              </div>
+                              
                               {test.video_url ? (
                                 <div className="relative group/vid max-w-3xl">
                                   <video
-                                    key={test.video_url} // Forces remount when a retry updates the URL
+                                    key={test.video_url} // Forces remount when URL arrives
                                     controls
                                     preload="metadata"
                                     playsInline
                                     className="w-full rounded-2xl border border-white/10 bg-black shadow-2xl aspect-video"
                                   >
-                                    {/* 🔥 WE POINT TO OUR PROXY: Extract the ID from the Pixeldrain URL */}
-                                    <source
-                                      src={`/api/automation/video?id=${test.video_url.split('/').pop()}`}
-                                      type="video/webm"
+                                    {/* Clean extract of the ID from the Pixeldrain URL */}
+                                    <source 
+                                      src={`/api/automation/video?id=${test.video_url.split('/').pop()?.split('?')[0]}`} 
+                                      type="video/webm" 
                                     />
                                     Your browser does not support the video tag.
                                   </video>
-
-                                  <div className="mt-2 flex justify-between items-center px-1">
-                                    <span className="text-[10px] font-black text-zinc-600 uppercase">
-                                      Latest Run: {test.run_number || 1}
-                                    </span>
-                                    <a
-                                      href={`/api/automation/video?id=${test.video_url.split('/').pop()}`}
-                                      target="_blank"
-                                      className="text-[9px] font-black text-indigo-500 hover:text-indigo-400 uppercase transition-colors flex items-center gap-1"
-                                    >
-                                      <ExternalLink className="w-3 h-3" /> Full Stream
-                                    </a>
-                                  </div>
                                 </div>
                               ) : (
                                 <div className="aspect-video max-w-3xl bg-white/[0.02] border border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center gap-2">
                                   <Video className="w-8 h-8 text-zinc-800" />
                                   <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest text-center px-4">
-                                    {test.status === 'running' ? 'Recording live session...' : 'No video available'}
+                                    {test.status === 'running' ? 'Capturing live recording...' : 'No recording available'}
                                   </span>
                                 </div>
                               )}
                             </div>
 
-                            {/* Failure Trace */}
+                            {/* Error Trace */}
                             {test.status === 'failed' && test.error && (
                               <div className="p-5 bg-red-500/[0.02] border border-red-500/10 rounded-2xl text-[11px] text-red-400/80 font-mono whitespace-pre-wrap leading-relaxed shadow-inner">{test.error}</div>
                             )}
@@ -304,9 +292,9 @@ export default function AutomationDashboard() {
 
 function FilterButton({ active, label, count, onClick, color }: any) {
   const colorClasses: any = {
-    green: active ? 'bg-green-500/20 text-green-400 border-green-500/30 shadow-green-500/5' : 'hover:bg-green-500/5 text-zinc-500 border-transparent',
-    red: active ? 'bg-red-500/20 text-red-400 border-red-500/30 shadow-red-500/5' : 'hover:bg-red-500/5 text-zinc-500 border-transparent',
-    indigo: active ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30 shadow-indigo-500/5' : 'hover:bg-indigo-500/5 text-zinc-500 border-transparent',
+    green: active ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'hover:bg-green-500/5 text-zinc-500 border-transparent',
+    red: active ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'hover:bg-red-500/5 text-zinc-500 border-transparent',
+    indigo: active ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30' : 'hover:bg-indigo-500/5 text-zinc-500 border-transparent',
     zinc: active ? 'bg-zinc-100/10 text-zinc-100 border-white/20' : 'hover:bg-white/5 text-zinc-500 border-transparent'
   };
   return (
@@ -345,44 +333,30 @@ function ProjectLevelStats({ tests }: { tests: any[] }) {
 function LogTerminal({ logs, status }: { logs: string[], status: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isRunning = status === 'running';
-
-  useEffect(() => {
-    if (isRunning && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [logs, isRunning]);
-
+  useEffect(() => { if (isRunning && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [logs, isRunning]);
   return (
     <div className="rounded-2xl border border-white/5 bg-[#050505] overflow-hidden shadow-inner">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 bg-white/[0.02]">
         <div className="flex items-center gap-2">
           <div className={`w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-indigo-500 animate-pulse' : 'bg-zinc-700'}`} />
-          <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-widest">
-            {isRunning ? 'Realtime stream' : 'Final execution log'}
-          </span>
+          <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-widest">{isRunning ? 'Realtime stream' : 'Execution log'}</span>
         </div>
         <span className="text-[8px] font-mono text-zinc-600">{logs.length} lines</span>
       </div>
       <div ref={scrollRef} className="p-5 font-mono text-[11px] max-h-80 overflow-y-auto leading-relaxed scroll-smooth custom-scrollbar select-text">
-        {logs.length === 0 && isRunning && <div className="text-zinc-700 italic">Initializing worker...</div>}
-        {logs.map((log, i) => {
-          const isError = /error|failed|exception|🔴|❌/i.test(log);
-          const isSuccess = /success|passed|✅/i.test(log);
-          return (
-            <div key={i} className="flex gap-4 mb-0.5 group">
-              <span className="text-zinc-800 select-none w-5 text-right italic font-light">{i + 1}</span>
-              <span className={`whitespace-pre-wrap ${isError ? 'text-red-400' : isSuccess ? 'text-green-400' : 'text-zinc-400'}`}>{log}</span>
-            </div>
-          );
-        })}
-        {isRunning && <div className="ml-9 w-1.5 h-3.5 bg-indigo-500 animate-pulse mt-1" />}
+        {logs.map((log, i) => (
+          <div key={i} className="flex gap-4 mb-0.5 group">
+            <span className="text-zinc-800 select-none w-5 text-right italic font-light">{i + 1}</span>
+            <span className={/error|failed|exception/i.test(log) ? 'text-red-400' : /✅|passed|success/i.test(log) ? 'text-green-400' : 'text-zinc-400'}>{log}</span>
+          </div>
+        ))}
+        {isRunning && <div className="ml-8 w-1.5 h-3.5 bg-indigo-500 animate-pulse mt-1" />}
       </div>
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const isRunning = status === 'running';
-  const isFailed = status === 'failed';
-  return <span className={`text-[9px] px-2 py-0.5 rounded font-black tracking-widest uppercase ${isFailed ? 'bg-red-500/10 text-red-500' : isRunning ? 'bg-indigo-500/10 text-indigo-500 animate-pulse' : 'bg-green-500/10 text-green-500'}`}>{status}</span>;
+  const color = status === 'failed' ? 'bg-red-500/10 text-red-500' : status === 'passed' ? 'bg-green-500/10 text-green-500' : 'bg-indigo-500/10 text-indigo-500 animate-pulse';
+  return <span className={`text-[9px] px-2 py-0.5 rounded font-black tracking-widest ${color}`}>{status.toUpperCase()}</span>;
 }
