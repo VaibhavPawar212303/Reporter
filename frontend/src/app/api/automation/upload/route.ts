@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import axios from 'axios';
 
 export const maxDuration = 60;
 
@@ -8,58 +9,51 @@ export async function POST(req: Request) {
     const file = formData.get('file') as File;
     const buildId = formData.get('buildId');
 
-    if (!file || file.size === 0) {
-      return NextResponse.json({ error: "File is empty" }, { status: 400 });
-    }
+    if (!file || file.size === 0) return NextResponse.json({ error: "Empty" }, { status: 400 });
 
     const apiKey = process.env.PIXELDRAIN_API_KEY;
     const auth = Buffer.from(`:${apiKey}`).toString('base64');
+    const safeName = `b${buildId}_${Date.now()}_${file.name.replace(/[^a-z0-9.]/gi, '_')}`;
 
-    // 🔥 FIX: Sanitize the filename. Remove spaces and special characters.
-    // Pixeldrain's API is very sensitive to the "name" field.
-    const cleanFileName = file.name
-      .replace(/\s+/g, '_')           // Replace spaces with underscores
-      .replace(/[^a-zA-Z0-9._-]/g, '') // Remove symbols like ( ) [ ]
-      .concat(file.name.endsWith('.webm') ? '' : '.webm');
+    console.log(`📥 [API] Starting upload: ${safeName}`);
 
-    console.log(`📥 API Received: ${cleanFileName} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+    // Convert File to Buffer for Axios
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
 
-    // Internal Retry Logic
-    let lastErr = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const pixelForm = new FormData();
-        pixelForm.append('file', file);
-        pixelForm.append('name', cleanFileName);
+    // 🔥 Switch from fetch to Axios for the internal request
+    // Pixeldrain expects the file in a field named 'file'
+    const pixelForm = new FormData();
+    pixelForm.append('file', new Blob([buffer]), safeName);
+    pixelForm.append('name', safeName);
 
-        const pixelResponse = await fetch('https://pixeldrain.com/api/file', {
-          method: 'POST',
-          body: pixelForm,
-          headers: { 'Authorization': `Basic ${auth}` },
-          signal: AbortSignal.timeout(40000), 
-        });
+    const pixelResponse = await axios.post('https://pixeldrain.com/api/file', pixelForm, {
+      headers: { 
+        'Authorization': `Basic ${auth}`,
+      },
+      timeout: 55000, // 55 seconds
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+    });
 
-        const pixelData = await pixelResponse.json();
-
-        if (pixelResponse.ok && pixelData.success) {
-          const videoUrl = `https://pixeldrain.com/api/file/${pixelData.id}`;
-          console.log(`✅ Pixeldrain Linked: ${videoUrl}`);
-          return NextResponse.json({ videoUrl });
-        } else {
-          throw new Error(pixelData.message || "Pixeldrain rejected upload");
-        }
-      } catch (err: any) {
-        lastErr = err;
-        console.warn(`⚠️ Internal attempt ${attempt} failed: ${err.message}`);
-        if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
-      }
+    if (pixelResponse.data.success) {
+      const videoUrl = `https://pixeldrain.com/api/file/${pixelResponse.data.id}?download=0`;
+      console.log(`✅ [API] Success: ${videoUrl}`);
+      return NextResponse.json({ videoUrl });
     }
 
-    throw lastErr;
+    throw new Error("Pixeldrain returned success: false");
 
   } catch (error: any) {
-    // This log will tell you EXACTLY why the 500 is happening
-    console.error("❌ CRITICAL UPLOAD ERROR:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    // 🔥 This will print the HIDDEN reason for "fetch failed"
+    console.error("❌ [API] CRITICAL ERROR DETAILS:");
+    console.error("Message:", error.message);
+    if (error.cause) console.error("Cause:", error.cause); 
+    if (error.response) console.error("Pixeldrain Response:", error.response.data);
+
+    return NextResponse.json({ 
+      error: error.message,
+      cause: error.cause?.message || "Unknown socket error"
+    }, { status: 500 });
   }
 }
