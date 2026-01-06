@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-export const maxDuration = 60; 
+export const maxDuration = 60;
 
 export async function POST(req: Request) {
   try {
@@ -15,38 +15,51 @@ export async function POST(req: Request) {
     const apiKey = process.env.PIXELDRAIN_API_KEY;
     const auth = Buffer.from(`:${apiKey}`).toString('base64');
 
-    // 1. Ensure the filename has the correct extension for streaming
-    const safeFileName = file.name.endsWith('.webm') ? file.name : `${file.name}.webm`;
+    // 🔥 FIX: Sanitize the filename. Remove spaces and special characters.
+    // Pixeldrain's API is very sensitive to the "name" field.
+    const cleanFileName = file.name
+      .replace(/\s+/g, '_')           // Replace spaces with underscores
+      .replace(/[^a-zA-Z0-9._-]/g, '') // Remove symbols like ( ) [ ]
+      .concat(file.name.endsWith('.webm') ? '' : '.webm');
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    console.log(`📥 API Received: ${cleanFileName} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+
+    // Internal Retry Logic
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const pixelForm = new FormData();
         pixelForm.append('file', file);
-        pixelForm.append('name', safeFileName); // Explicit name help headers
+        pixelForm.append('name', cleanFileName);
 
         const pixelResponse = await fetch('https://pixeldrain.com/api/file', {
           method: 'POST',
           body: pixelForm,
           headers: { 'Authorization': `Basic ${auth}` },
-          signal: AbortSignal.timeout(45000), 
+          signal: AbortSignal.timeout(40000), 
         });
 
         const pixelData = await pixelResponse.json();
 
         if (pixelResponse.ok && pixelData.success) {
-          // 🔥 FIX: Return the CLEAN URL without ?download=0
           const videoUrl = `https://pixeldrain.com/api/file/${pixelData.id}`;
           console.log(`✅ Pixeldrain Linked: ${videoUrl}`);
-          
           return NextResponse.json({ videoUrl });
+        } else {
+          throw new Error(pixelData.message || "Pixeldrain rejected upload");
         }
-      } catch (error: any) {
-        if (attempt === 3) throw error;
-        await new Promise(r => setTimeout(r, 1000));
+      } catch (err: any) {
+        lastErr = err;
+        console.warn(`⚠️ Internal attempt ${attempt} failed: ${err.message}`);
+        if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
       }
     }
+
+    throw lastErr;
+
   } catch (error: any) {
-    console.error("❌ Upload API Error:", error.message);
+    // This log will tell you EXACTLY why the 500 is happening
+    console.error("❌ CRITICAL UPLOAD ERROR:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
