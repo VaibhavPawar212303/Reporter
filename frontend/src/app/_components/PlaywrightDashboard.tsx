@@ -86,7 +86,7 @@ export default function AutomationDashboard() {
     return selectedBuild?.results?.reduce((acc: any, spec: any) => {
       spec.tests.forEach((test: any) => {
         const projectName = test.project || "Default";
-        
+
         const matchesStatus = filterStatus === 'all' ||
           (filterStatus === 'passed' && (test.status === 'passed' || test.status === 'expected')) ||
           (filterStatus === 'failed' && test.status === 'failed') ||
@@ -180,7 +180,7 @@ export default function AutomationDashboard() {
             <div className="flex flex-col items-center justify-center py-32 bg-[#0c0c0e] rounded-3xl border border-dashed border-white/5 text-center">
               <Hash className="w-12 h-12 text-zinc-800 mb-4" />
               <p className="text-zinc-500 font-bold uppercase text-[10px] tracking-widest">No matching results found</p>
-              <button onClick={() => {setFilterStatus('all'); setProjectSearch(''); setSelectedProjectFilter('all');}} className="mt-4 text-indigo-500 text-[10px] font-black uppercase tracking-widest hover:underline">Reset Filters</button>
+              <button onClick={() => { setFilterStatus('all'); setProjectSearch(''); setSelectedProjectFilter('all'); }} className="mt-4 text-indigo-500 text-[10px] font-black uppercase tracking-widest hover:underline">Reset Filters</button>
             </div>
           ) : sortedProjectNames.map((projectName) => {
             const tests = filteredAggregatedProjects[projectName];
@@ -255,27 +255,23 @@ export default function AutomationDashboard() {
                                   </a>
                                 )}
                               </div>
-                              {test.video_url ? (
+                              {test.video_url && (
                                 <div className="relative group/vid max-w-3xl">
                                   <video
-                                    key={test.video_url} // Forces remount when URL arrives
+                                    // Forces player to reload when a new URL arrives
+                                    key={test.video_url}
                                     controls
                                     preload="metadata"
                                     playsInline
-                                    referrerPolicy="no-referrer"
-                                    className="w-full rounded-2xl border border-white/10 bg-black shadow-2xl aspect-video"
+                                    className="w-full rounded-2xl border border-white/10 bg-black aspect-video"
                                   >
-                                    {/* Using Proxy Route to bypass hotlinking 403 blocks */}
-                                    <source src={`/api/automation/video?id=${test.video_url.split('/').pop()}`} type="video/webm" />
+                                    {/* 🔥 FIX: Extract the ID and use the internal PROXY route */}
+                                    <source
+                                      src={`/api/automation/video?id=${test.video_url.split('/').pop()}`}
+                                      type="video/webm"
+                                    />
                                     Your browser does not support the video tag.
                                   </video>
-                                </div>
-                              ) : (
-                                <div className="aspect-video max-w-3xl bg-white/[0.02] border border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center gap-2">
-                                  <PlayCircle className="w-8 h-8 text-zinc-800" />
-                                  <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">
-                                    {test.status === 'running' ? 'Recording in progress...' : 'No recording available'}
-                                  </span>
                                 </div>
                               )}
                             </div>
