@@ -25,7 +25,6 @@ export async function POST(req: Request) {
 
     // 3. Use a Transaction to handle concurrency (4+ workers) safely
     return await db.transaction(async (tx) => {
-      // Find the existing spec row
       const existingRecord = await tx.query.testResults.findFirst({
         where: and(
           eq(testResults.buildId, build_id),
@@ -35,8 +34,6 @@ export async function POST(req: Request) {
 
       let updatedTests = existingRecord ? (existingRecord.tests as any[]) : [];
       
-      // 🔥 FIX: Find the test using BOTH Title and Project
-      // This prevents Chromium tests from overwriting Firefox tests with the same name
       const testIndex = updatedTests.findIndex((t) => 
         t.title === test_entry.title && 
         t.project === test_entry.project
@@ -48,8 +45,17 @@ export async function POST(req: Request) {
         
         updatedTests[testIndex] = {
           ...existingTest,
-          ...test_entry, // Updates status, duration, error, video_url, etc.
-          // Append logs if a log_chunk was sent
+          ...test_entry, 
+          
+          // 🔥 FIX: Persist Video URL
+          // If the incoming test_entry has a null video_url, but the DB already has one, 
+          // we KEEP the existing one. This prevents logs from overwriting video links.
+          video_url: test_entry.video_url || existingTest.video_url || null,
+          
+          // 🔥 FIX: Persist Run Number
+          run_number: test_entry.run_number || existingTest.run_number || 1,
+
+          // Append logs
           logs: sanitizedLog 
             ? [...(existingTest.logs || []), sanitizedLog] 
             : (existingTest.logs || [])
@@ -62,8 +68,7 @@ export async function POST(req: Request) {
         });
       }
 
-      // 4. Atomic Upsert back to the database
-      // The onConflictDoUpdate relies on the unique(build_id, spec_file) constraint in your schema
+      // 4. Atomic Upsert
       await tx.insert(testResults)
         .values({
           buildId: build_id,
