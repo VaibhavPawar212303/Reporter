@@ -241,37 +241,44 @@ export default function AutomationDashboard() {
                               </div>
                               <LogTerminal logs={test.logs || []} status={test.status} />
                             </div>
-
-                            {/* Video Section with Proxy Logic */}
+                            {/* Find the video section inside your test mapping loop */}
                             <div className="space-y-3">
-                              <div className="flex items-center justify-between px-1">
-                                <div className="flex items-center gap-2 text-zinc-500">
-                                  <Video className="w-3 h-3" />
-                                  <span className="text-[9px] font-black uppercase tracking-widest">Evidence</span>
-                                </div>
-                                {test.video_url && (
-                                  <a href={`/api/automation/video?id=${test.video_url.split('/').pop()}`} target="_blank" className="flex items-center gap-1 text-[9px] font-black text-indigo-500 hover:text-indigo-400 uppercase transition-colors">
-                                    <ExternalLink className="w-3 h-3" /> Direct Stream
-                                  </a>
-                                )}
-                              </div>
-                              {test.video_url && (
+                              {test.video_url ? (
                                 <div className="relative group/vid max-w-3xl">
                                   <video
-                                    // Forces player to reload when a new URL arrives
-                                    key={test.video_url}
+                                    key={test.video_url} // Forces remount when a retry updates the URL
                                     controls
                                     preload="metadata"
                                     playsInline
-                                    className="w-full rounded-2xl border border-white/10 bg-black aspect-video"
+                                    className="w-full rounded-2xl border border-white/10 bg-black shadow-2xl aspect-video"
                                   >
-                                    {/* 🔥 FIX: Extract the ID and use the internal PROXY route */}
+                                    {/* 🔥 WE POINT TO OUR PROXY: Extract the ID from the Pixeldrain URL */}
                                     <source
                                       src={`/api/automation/video?id=${test.video_url.split('/').pop()}`}
                                       type="video/webm"
                                     />
                                     Your browser does not support the video tag.
                                   </video>
+
+                                  <div className="mt-2 flex justify-between items-center px-1">
+                                    <span className="text-[10px] font-black text-zinc-600 uppercase">
+                                      Latest Run: {test.run_number || 1}
+                                    </span>
+                                    <a
+                                      href={`/api/automation/video?id=${test.video_url.split('/').pop()}`}
+                                      target="_blank"
+                                      className="text-[9px] font-black text-indigo-500 hover:text-indigo-400 uppercase transition-colors flex items-center gap-1"
+                                    >
+                                      <ExternalLink className="w-3 h-3" /> Full Stream
+                                    </a>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="aspect-video max-w-3xl bg-white/[0.02] border border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center gap-2">
+                                  <Video className="w-8 h-8 text-zinc-800" />
+                                  <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest text-center px-4">
+                                    {test.status === 'running' ? 'Recording live session...' : 'No video available'}
+                                  </span>
                                 </div>
                               )}
                             </div>
