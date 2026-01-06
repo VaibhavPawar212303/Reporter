@@ -249,17 +249,11 @@ export default function AutomationDashboard() {
                                   <video
                                     key={test.video_url}
                                     controls
-                                    // 🔥 CHANGE: Use 'none' to prevent the browser from loading 
-                                    // every video in the list automatically. It will only load when you click Play.
-                                    preload="none"
-                                    playsInline
-                                    className="w-full rounded-2xl border border-white/10 bg-black shadow-2xl aspect-video"
-                                  // Add a poster image (optional) to make it look good while not loaded
+                                    preload="metadata"
+                                    className="w-full rounded-2xl border border-white/10 bg-black aspect-video"
                                   >
-                                    <source
-                                      src={`/api/automation/video?id=${test.video_url.split('/').pop()}`}
-                                      type="video/webm"
-                                    />
+                                    {/* Catbox links are direct, no proxy needed! */}
+                                    <source src={test.video_url} type="video/webm" />
                                     Your browser does not support the video tag.
                                   </video>
                                 </div>
