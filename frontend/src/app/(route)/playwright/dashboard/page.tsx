@@ -17,7 +17,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export default function AutomationDashboard() {
+export default function PlaywrightDashboard() {
   const [builds, setBuilds] = useState<any[]>([]);
   const [masterCases, setMasterCases] = useState<any[]>([]);
   const [selectedBuild, setSelectedBuild] = useState<any>(null);
