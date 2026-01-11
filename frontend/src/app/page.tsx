@@ -18,7 +18,7 @@ import { twMerge } from "tailwind-merge";
 import ArchitectView from "@/app/_components/ArchitectView";
 import ChatView from "@/app/_components/ChatView";
 import CreateTestCase from "./(route)/testcases/page";
-import CypressDashboard from "@/app/_components/CypressDashboard";
+import CypressDashboard from "@/app/(route)/cypress/dashboard/page";
 import AutomationDashboard from "./_components/PlaywrightDashboard";
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
@@ -29,8 +29,6 @@ type ViewState = "chat" | "architect" | "testcases" | "cypress" | "playwright";
 export default function Home() {
   const [activeView, setActiveView] = useState<ViewState>("chat");
   const [socket, setSocket] = useState<WebSocket | null>(null);
-
-  // ... (WebSocket connection logic can stay here if needed globally)
 
   return (
     <div className="flex h-screen bg-[#111] text-zinc-300 font-sans text-sm antialiased">
