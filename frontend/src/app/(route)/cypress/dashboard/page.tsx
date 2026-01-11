@@ -5,7 +5,7 @@ import { getBuildHistory, getMasterTestCases } from "@/lib/actions";
 import { createClient } from "@supabase/supabase-js";
 import { Loader2 } from "lucide-react";
 import { StatusBadge } from "./_components/StatusBadge";
-import { ProjectCard } from "./_components/ProjectCard";
+import { SpecFileCard } from "./_components/SpecFileCard";
 import { DashboardHeader } from "./_components/DashboardHeader";
 import { CoverageGap } from "./_components/CoverageGap";
 
@@ -22,6 +22,7 @@ export default function AutomationDashboard() {
   const [expandedTests, setExpandedTests] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<'all' | 'passed' | 'failed' | 'running'>('all');
   const [projectSearch, setProjectSearch] = useState('');
+  const [specSearch, setSpecSearch] = useState('');
 
   const loadData = useCallback(async (isInitial = false) => {
     try {
@@ -40,32 +41,39 @@ export default function AutomationDashboard() {
     const interval = setInterval(() => { if (!document.hidden) loadData(false); }, 2000);
     const channel = supabase.channel('db-changes').on('postgres_changes', {
       event: 'UPDATE', schema: 'public', table: 'test_results'
-    }, () => loadData(false)).subscribe(); // Trigger reload on change
+    }, () => loadData(false)).subscribe();
     return () => { clearInterval(interval); supabase.removeChannel(channel); };
   }, [loadData]);
 
   const masterMap = useMemo(() => masterCases.reduce((acc, tc) => ({ ...acc, [tc.caseCode]: tc }), {}), [masterCases]);
 
-  // 🔥 Grouping Logic: Project -> tests & 1 common video
-  const projects = useMemo(() => {
-    return selectedBuild?.results?.reduce((acc: any, spec: any) => {
-      spec.tests.forEach((test: any) => {
-        const projectName = test.project || "Default";
-        if (filterStatus !== 'all' && test.status !== filterStatus) return;
-        if (!projectName.toLowerCase().includes(projectSearch.toLowerCase())) return;
+  // 🔥 CORE LOGIC: Group all tests from all result rows by their Spec File Name
+  const specGroups = useMemo(() => {
+    return selectedBuild?.results?.reduce((acc: any, result: any) => {
+      const fileName = result.specFile;
+      
+      // Filter Spec File by search
+      if (specSearch && !fileName.toLowerCase().includes(specSearch.toLowerCase())) return acc;
 
-        if (!acc[projectName]) acc[projectName] = { tests: [], video: null };
-        
-        acc[projectName].tests.push({ ...test, specFile: spec.specFile, specId: spec.id });
-        
-        // Use the first available video URL as the project-level video
-        if (test.video_url && !acc[projectName].video) {
-            acc[projectName].video = test.video_url;
-        }
+      const filteredTests = result.tests.filter((test: any) => {
+        const matchesStatus = filterStatus === 'all' || test.status === filterStatus;
+        const matchesProject = projectSearch === '' || test.project?.toLowerCase().includes(projectSearch.toLowerCase());
+        return matchesStatus && matchesProject;
       });
+
+      if (filteredTests.length > 0) {
+        if (!acc[fileName]) {
+          acc[fileName] = { specFile: fileName, tests: [], video: null };
+        }
+        // Use the first video found for this spec group
+        if (!acc[fileName].video) {
+          acc[fileName].video = filteredTests.find((t: any) => t.video_url)?.video_url;
+        }
+        acc[fileName].tests.push(...filteredTests.map((t: any) => ({ ...t, specId: result.id, specFile: fileName })));
+      }
       return acc;
     }, {});
-  }, [selectedBuild, filterStatus, projectSearch]);
+  }, [selectedBuild, filterStatus, projectSearch, specSearch]);
 
   const toggleTest = (id: string) => setExpandedTests(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
@@ -81,30 +89,24 @@ export default function AutomationDashboard() {
               <span className="text-sm font-black text-white">BUILD #{b.id}</span>
               <StatusBadge status={b.status} />
             </div>
-            <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-tight">{new Date(b.createdAt).toLocaleString()}</p>
+            <p className="text-[10px] text-zinc-500 font-mono uppercase">{new Date(b.createdAt).toLocaleString()}</p>
           </button>
         ))}
       </aside>
 
       <main className="flex-1 overflow-y-auto p-10 space-y-12">
         <DashboardHeader 
-            selectedBuild={selectedBuild} 
-            masterCases={masterCases} 
-            filterStatus={filterStatus} 
-            setFilterStatus={setFilterStatus} 
-            projectSearch={projectSearch} 
-            setProjectSearch={setProjectSearch} 
+          selectedBuild={selectedBuild} masterCases={masterCases} 
+          filterStatus={filterStatus} setFilterStatus={setFilterStatus} 
+          projectSearch={projectSearch} setProjectSearch={setProjectSearch}
+          specSearch={specSearch} setSpecSearch={setSpecSearch}
         />
         
         <div className="space-y-16">
-          {Object.entries(projects || {}).sort().map(([projectName, data]: [string, any]) => (
-            <ProjectCard 
-              key={projectName}
-              projectName={projectName}
-              data={data}
-              masterMap={masterMap}
-              expandedTests={expandedTests}
-              toggleTest={toggleTest}
+          {Object.entries(specGroups || {}).sort().map(([name, data]: [string, any]) => (
+            <SpecFileCard 
+              key={name} projectName={name} data={data} 
+              masterMap={masterMap} expandedTests={expandedTests} toggleTest={toggleTest} 
             />
           ))}
         </div>
