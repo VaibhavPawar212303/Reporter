@@ -19,7 +19,8 @@ import ArchitectView from "@/app/_components/ArchitectView";
 import ChatView from "@/app/_components/ChatView";
 import CreateTestCase from "./(route)/testcases/page";
 import CypressDashboard from "@/app/(route)/cypress/dashboard/page";
-import AutomationDashboard from "./_components/PlaywrightDashboard";
+import AutomationDashboard from "./(route)/playwright/dashboard/page";
+
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 

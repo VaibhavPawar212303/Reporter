@@ -8,6 +8,7 @@ import { StatusBadge } from "./_components/StatusBadge";
 import { SpecFileCard } from "./_components/SpecFileCard";
 import { DashboardHeader } from "./_components/DashboardHeader";
 import { CoverageGap } from "./_components/CoverageGap";
+import { cn } from "@/lib/utils"; // Ensure you have your cn utility
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,14 +25,28 @@ export default function AutomationDashboard() {
   const [projectSearch, setProjectSearch] = useState('');
   const [specSearch, setSpecSearch] = useState('');
 
+  // 🔥 1. Filter builds to show ONLY Cypress type
+  const cypressBuilds = useMemo(() => {
+    return builds.filter(b => b.type === 'cypress' || 'Cypress');
+  }, [builds]);
+
   const loadData = useCallback(async (isInitial = false) => {
     try {
       if (isInitial) setLoading(true);
       const [history, master] = await Promise.all([getBuildHistory(), getMasterTestCases()]);
+      
       setBuilds(history);
       setMasterCases(master);
+
       if (history?.length > 0) {
-        setSelectedBuild((current: any) => history.find((b: any) => b.id === (current?.id || history[0].id)) || history[0]);
+        // 🔥 2. Auto-select only from Cypress builds
+        const onlyCypress = history.filter((b: any) => b.type === 'cypress');
+        if (onlyCypress.length > 0) {
+          setSelectedBuild((current: any) => {
+            const found = onlyCypress.find((b: any) => b.id === (current?.id || onlyCypress[0].id));
+            return found || onlyCypress[0];
+          });
+        }
       }
     } catch (e) { console.error(e); } finally { if (isInitial) setLoading(false); }
   }, []);
@@ -47,12 +62,9 @@ export default function AutomationDashboard() {
 
   const masterMap = useMemo(() => masterCases.reduce((acc, tc) => ({ ...acc, [tc.caseCode]: tc }), {}), [masterCases]);
 
-  // 🔥 CORE LOGIC: Group all tests from all result rows by their Spec File Name
   const specGroups = useMemo(() => {
     return selectedBuild?.results?.reduce((acc: any, result: any) => {
       const fileName = result.specFile;
-      
-      // Filter Spec File by search
       if (specSearch && !fileName.toLowerCase().includes(specSearch.toLowerCase())) return acc;
 
       const filteredTests = result.tests.filter((test: any) => {
@@ -62,13 +74,8 @@ export default function AutomationDashboard() {
       });
 
       if (filteredTests.length > 0) {
-        if (!acc[fileName]) {
-          acc[fileName] = { specFile: fileName, tests: [], video: null };
-        }
-        // Use the first video found for this spec group
-        if (!acc[fileName].video) {
-          acc[fileName].video = filteredTests.find((t: any) => t.video_url)?.video_url;
-        }
+        if (!acc[fileName]) acc[fileName] = { specFile: fileName, tests: [], video: null };
+        if (!acc[fileName].video) acc[fileName].video = filteredTests.find((t: any) => t.video_url)?.video_url;
         acc[fileName].tests.push(...filteredTests.map((t: any) => ({ ...t, specId: result.id, specFile: fileName })));
       }
       return acc;
@@ -81,15 +88,34 @@ export default function AutomationDashboard() {
 
   return (
     <div className="flex h-screen bg-[#09090b] text-zinc-300 font-sans selection:bg-indigo-500/30">
+      {/* Sidebar: Show ONLY Cypress Builds */}
       <aside className="w-80 border-r border-white/5 overflow-y-auto bg-[#0b0b0d]">
-        <div className="p-6 border-b border-white/5 font-black text-[10px] uppercase tracking-[0.2em] text-zinc-500">History</div>
-        {builds.map(b => (
-          <button key={b.id} onClick={() => setSelectedBuild(b)} className={`w-full text-left p-5 border-b border-white/5 transition-all ${selectedBuild?.id === b.id ? 'bg-indigo-600/10 border-r-2 border-r-indigo-500' : 'hover:bg-white/5'}`}>
+        <div className="p-6 border-b border-white/5 font-black text-[10px] uppercase tracking-[0.2em] text-zinc-500 flex justify-between items-center">
+          <span>Cypress History</span>
+          <span className="bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded text-[8px] border border-indigo-500/20">LIVE</span>
+        </div>
+        {cypressBuilds.length === 0 ? (
+           <div className="p-10 text-center text-zinc-600 text-xs font-bold uppercase tracking-widest">No Cypress Builds Found</div>
+        ) : cypressBuilds.map(b => (
+          <button 
+            key={b.id} 
+            onClick={() => setSelectedBuild(b)} 
+            className={cn(
+                "w-full text-left p-5 border-b border-white/5 transition-all",
+                selectedBuild?.id === b.id ? 'bg-indigo-600/10 border-r-2 border-r-indigo-500' : 'hover:bg-white/5'
+            )}
+          >
             <div className="flex justify-between items-center mb-1">
-              <span className="text-sm font-black text-white">BUILD #{b.id}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-black text-white uppercase tracking-tighter">Build #{b.id}</span>
+                {/* Visual Framework Indicator */}
+                <span className="text-[7px] px-1.5 py-0.5 rounded font-black bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">CY</span>
+              </div>
               <StatusBadge status={b.status} />
             </div>
-            <p className="text-[10px] text-zinc-500 font-mono uppercase">{new Date(b.createdAt).toLocaleString()}</p>
+            <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-tight">
+                {new Date(b.createdAt).toLocaleDateString()} {new Date(b.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+            </p>
           </button>
         ))}
       </aside>
