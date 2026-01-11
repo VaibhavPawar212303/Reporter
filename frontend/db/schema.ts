@@ -6,6 +6,7 @@ export const automationBuilds = pgTable('automation_builds', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   status: text('status').default('running').notNull(),
   environment: text('environment').default('dev'),
+  type: text('type'), // 🔥 New column: stores 'playwright' or 'cypress'
 });
 
 export const testResults = pgTable('test_results', {

@@ -3,17 +3,21 @@ import { NextResponse } from 'next/server';
 import { db } from '../../../../../db';
 import { automationBuilds } from '../../../../../db/schema';
 
-export async function POST() {
-  console.log("🚀 API: Received request to start a new build");
+export async function POST(req: Request) {
   try {
+    const body = await req.json();
+    const { environment, type } = body; // 🔥 Extract type
+
     const [newBuild] = await db.insert(automationBuilds).values({
+      environment: environment || 'dev',
       status: 'running',
-    }).returning();
-    
-    console.log("✅ API: Build created in DB with ID:", newBuild.id);
-    return NextResponse.json(newBuild);
-  } catch (error) {
-    console.error("❌ API: Failed to create build:", error);
-    return NextResponse.json({ error: "DB Insertion failed" }, { status: 500 });
+      type: type || 'unknown', // 🔥 Save type
+    }).returning({
+      insertedId: automationBuilds.id
+    });
+
+    return NextResponse.json({ buildId: newBuild.insertedId });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
