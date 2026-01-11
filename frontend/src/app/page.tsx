@@ -1,131 +1,80 @@
 "use client";
 
-import { useState } from "react";
-import {
-  Bot,
-  TestTube,
-  FileCode,
-  Bug,
-  Settings,
-  MessageSquare,
-  PenTool,
-  PlayCircle
-} from "lucide-react";
-import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import React, { useState } from "react";
+import { Bot, TestTube, FileCode, Bug, Settings, MessageSquare, PenTool, PlayCircle, Book, Play } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 // --- Components ---
 import ArchitectView from "@/app/_components/ArchitectView";
 import ChatView from "@/app/_components/ChatView";
 import CreateTestCase from "./(route)/testcases/page";
 import CypressDashboard from "@/app/(route)/cypress/dashboard/page";
-import AutomationDashboard from "./(route)/playwright/dashboard/page";
+import TestCaseManager from "./(route)/test-cases/page";
+import PlaywrightDashboard from "./(route)/playwright/dashboard/page";
 
 
-function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
-
-// Define view types
-type ViewState = "chat" | "architect" | "testcases" | "cypress" | "playwright";
+type ViewState = "chat" | "architect" | "testcases" | "cypress" | "playwright" | "test-cases";
 
 export default function Home() {
-  const [activeView, setActiveView] = useState<ViewState>("chat");
-  const [socket, setSocket] = useState<WebSocket | null>(null);
+  const [activeView, setActiveView] = useState<ViewState>("test-cases");
 
   return (
-    <div className="flex h-screen bg-[#111] text-zinc-300 font-sans text-sm antialiased">
-
+    <div className="flex h-screen bg-[#09090b] text-zinc-300 font-sans text-sm antialiased overflow-hidden">
+      
       {/* SIDEBAR NAVIGATION */}
-      <aside className="w-16 lg:w-64 bg-black/30 border-r border-white/5 flex flex-col transition-all duration-300">
-        <div className="h-16 flex items-center justify-center lg:justify-start lg:px-6 gap-3 border-b border-white/5">
-          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-900/20">
-            <Bot className="w-5 h-5 text-white" />
-          </div>
-          <h1 className="font-semibold text-white tracking-tighter hidden lg:block">QA Suite</h1>
+      <aside className="w-16 lg:w-64 bg-black/40 border-r border-white/5 flex flex-col shrink-0 transition-all duration-300">
+        <div className="h-16 flex items-center px-6 gap-3 border-b border-white/5">
+          <Bot className="w-6 h-6 text-indigo-500" />
+          <h1 className="font-bold text-white tracking-tighter hidden lg:block text-lg">QA Suite</h1>
         </div>
 
-        <nav className="p-2 space-y-1 mt-4">
-          <div className="px-3 pb-2 text-[10px] uppercase font-bold text-zinc-600 tracking-wider hidden lg:block">
-            Automation
-          </div>
+        <nav className="p-4 space-y-2 flex-1 overflow-y-auto custom-scrollbar">
+          <div className="text-[10px] uppercase font-black text-zinc-600 tracking-[0.2em] mb-4 hidden lg:block">Automation</div>
+          <NavItem icon={<Play />} label="Playwright" active={activeView === "playwright"} onClick={() => setActiveView("playwright")} />
+          <NavItem icon={<PlayCircle />} label="Cypress" active={activeView === "cypress"} onClick={() => setActiveView("cypress")} />
+          <NavItem icon={<MessageSquare />} label="AI Chat" active={activeView === "chat"} onClick={() => setActiveView("chat")} />
+          <NavItem icon={<FileCode />} label="AI Architect" active={activeView === "architect"} onClick={() => setActiveView("architect")} />
 
-          <NavItem
-            icon={<MessageSquare className="w-4 h-4" />}
-            label="AI Chat"
-            isActive={activeView === "chat"}
-            onClick={() => setActiveView("chat")}
-          />
+          <div className="h-px bg-white/5 my-6" />
 
-          <NavItem
-            icon={<FileCode className="w-4 h-4" />}
-            label="AI Architect"
-            isActive={activeView === "architect"}
-            onClick={() => setActiveView("architect")}
-          />
-
-          <NavItem
-            icon={<PlayCircle className="w-4 h-4" />}
-            label="Cypress Runner"
-            isActive={activeView === "cypress"}
-            onClick={() => setActiveView("cypress")}
-          />
-          <NavItem
-            icon={<PlayCircle className="w-4 h-4" />}
-            label="Playwright Runner"
-            isActive={activeView === "playwright"}
-            onClick={() => setActiveView("playwright")}
-          />
-
-          <div className="my-4 border-t border-white/5 mx-2" />
-
-          <div className="px-3 pb-2 text-[10px] uppercase font-bold text-zinc-600 tracking-wider hidden lg:block">
-            Manual
-          </div>
-
-          <NavItem
-            icon={<PenTool className="w-4 h-4" />}
-            label="Test Builder"
-            isActive={activeView === "testcases"}
-            onClick={() => setActiveView("testcases")}
-          />
-
-          <NavItem icon={<TestTube className="w-4 h-4" />} label="Test Runner" />
-          <NavItem icon={<Bug className="w-4 h-4" />} label="Self-Healing" />
+          <div className="text-[10px] uppercase font-black text-zinc-600 tracking-[0.2em] mb-4 hidden lg:block">Manual</div>
+          <NavItem icon={<Book />} label="Test Cases" active={activeView === "test-cases"} onClick={() => setActiveView("test-cases")} />
+          <NavItem icon={<PenTool />} label="Test Builder" active={activeView === "testcases"} onClick={() => setActiveView("testcases")} />
+          <NavItem icon={<TestTube />} label="Test Runner" />
+          <NavItem icon={<Bug />} label="Self-Healing" />
         </nav>
 
-        <div className="mt-auto p-4 border-t border-white/5">
-          <button className="flex items-center gap-3 p-2 rounded-md hover:bg-white/5 w-full text-zinc-500 hover:text-zinc-300 transition-colors">
+        <div className="p-4 border-t border-white/5">
+          <button className="flex items-center gap-3 p-2 text-zinc-500 hover:text-white transition-colors w-full">
             <Settings className="w-4 h-4" />
-            <span className="hidden lg:block text-xs font-medium">Settings</span>
+            <span className="hidden lg:block font-bold text-xs uppercase tracking-widest">Settings</span>
           </button>
         </div>
       </aside>
 
       {/* MAIN VIEW AREA */}
-      <main className="flex-1 flex flex-col min-w-0 bg-[#09090b]">
-        {activeView === "chat" && <ChatView />}
-        {activeView === "architect" && <ArchitectView socket={socket} />}
-        {activeView === "testcases" && <CreateTestCase />}
-        {activeView === "cypress" && <CypressDashboard />}
-        {activeView === "playwright" && <AutomationDashboard />}
+      <main className="flex-1 min-w-0 bg-[#09090b] overflow-y-auto custom-scrollbar">
+        <div className="min-h-full flex flex-col">
+          {activeView === "chat" && <ChatView />}
+          {activeView === "architect" && <ArchitectView socket={null} />}
+          {activeView === "testcases" && <CreateTestCase />}
+          {activeView === "test-cases" && <TestCaseManager />} 
+          {activeView === "cypress" && <CypressDashboard />}
+          {activeView === "playwright" && <PlaywrightDashboard />}
+        </div>
       </main>
     </div>
   );
 }
 
-// Helper Component for Sidebar Items
-function NavItem({ icon, label, isActive, onClick }: any) {
+function NavItem({ icon, label, active, onClick }: any) {
   return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "flex items-center gap-3 px-3 py-2.5 rounded-md w-full transition-all group",
-        isActive
-          ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/20"
-          : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
-      )}
-    >
-      <span className={cn(isActive ? "text-indigo-400" : "text-zinc-500 group-hover:text-zinc-300")}>{icon}</span>
-      <span className="hidden lg:block font-medium">{label}</span>
+    <button onClick={onClick} className={cn(
+      "flex items-center gap-3 px-3 py-3 rounded-xl w-full transition-all group",
+      active ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-lg" : "text-zinc-500 hover:bg-white/5"
+    )}>
+      {React.cloneElement(icon, { className: cn("w-5 h-5", active ? "text-indigo-400" : "text-zinc-500 group-hover:text-zinc-300") })}
+      <span className="hidden lg:block font-bold tracking-tight">{label}</span>
     </button>
   );
 }
