@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Bot, TestTube, FileCode, Bug, Settings, MessageSquare, PenTool, PlayCircle, Book, Play } from "lucide-react";
+import { Bot, TestTube, FileCode, Bug, Settings, MessageSquare, PenTool, PlayCircle, Book, LayoutDashboard } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // --- Components ---
@@ -11,9 +11,9 @@ import CreateTestCase from "./(route)/testcases/page";
 import CypressDashboard from "@/app/(route)/cypress/dashboard/page";
 import TestCaseManager from "./(route)/test-cases/page";
 import PlaywrightDashboard from "./(route)/playwright/dashboard/page";
+import Overview from "./_components/Overview";
 
-
-type ViewState = "chat" | "architect" | "testcases" | "cypress" | "playwright" | "test-cases";
+type ViewState = "overview"|"chat" | "architect" | "testcases" | "cypress" | "playwright" | "test-cases";
 
 export default function Home() {
   const [activeView, setActiveView] = useState<ViewState>("test-cases");
@@ -30,7 +30,8 @@ export default function Home() {
 
         <nav className="p-4 space-y-2 flex-1 overflow-y-auto custom-scrollbar">
           <div className="text-[10px] uppercase font-black text-zinc-600 tracking-[0.2em] mb-4 hidden lg:block">Automation</div>
-          <NavItem icon={<Play />} label="Playwright" active={activeView === "playwright"} onClick={() => setActiveView("playwright")} />
+          <NavItem icon={<LayoutDashboard className="w-4 h-4" />}label="Executive Overview"isActive={activeView === "overview"}onClick={() => setActiveView("overview")}/>
+          <NavItem icon={<PlayCircle />} label="Playwright" active={activeView === "playwright"} onClick={() => setActiveView("playwright")} />
           <NavItem icon={<PlayCircle />} label="Cypress" active={activeView === "cypress"} onClick={() => setActiveView("cypress")} />
           <NavItem icon={<MessageSquare />} label="AI Chat" active={activeView === "chat"} onClick={() => setActiveView("chat")} />
           <NavItem icon={<FileCode />} label="AI Architect" active={activeView === "architect"} onClick={() => setActiveView("architect")} />
@@ -55,6 +56,7 @@ export default function Home() {
       {/* MAIN VIEW AREA */}
       <main className="flex-1 min-w-0 bg-[#09090b] overflow-y-auto custom-scrollbar">
         <div className="min-h-full flex flex-col">
+          {activeView === "overview" && <Overview />}
           {activeView === "chat" && <ChatView />}
           {activeView === "architect" && <ArchitectView socket={null} />}
           {activeView === "testcases" && <CreateTestCase />}

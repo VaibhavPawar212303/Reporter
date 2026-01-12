@@ -27,7 +27,7 @@ export default function AutomationDashboard() {
 
   // 🔥 1. Filter builds to show ONLY Cypress type
   const cypressBuilds = useMemo(() => {
-    return builds.filter(b => b.type === 'cypress' || 'Cypress');
+    return builds.filter(b => b.type === 'cypress');
   }, [builds]);
 
   const loadData = useCallback(async (isInitial = false) => {

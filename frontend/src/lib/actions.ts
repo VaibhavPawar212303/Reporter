@@ -96,3 +96,22 @@ export async function updateTestCase(id: number, data: any) {
     return { error: error.message };
   }
 }
+
+export async function getDashboardStats() {
+  try {
+    const allBuilds = await db.query.automationBuilds.findMany({
+      with: { results: true }
+    });
+    const allMasterCases = await db.query.testCases.findMany();
+
+    return {
+      totalBuilds: allBuilds.length,
+      totalRequirements: allMasterCases.length,
+      builds: allBuilds,
+   
+      masterCases: allMasterCases
+    };
+  } catch (error) {
+    return { totalBuilds: 0, totalRequirements: 0, builds: [], masterCases: [] };
+  }
+}
