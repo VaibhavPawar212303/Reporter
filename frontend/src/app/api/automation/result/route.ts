@@ -18,8 +18,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Build ID ${build_id} not found.` }, { status: 400 });
     }
 
-    // 2. Utility to clean terminal color codes (ANSI)
-    const cleanText = (text: string) => text?.replace(/\u001b\[\d+m/g, '') || '';
+    /**
+     * 2. Improved Utility to clean terminal color codes (ANSI)
+     * Handles standard colors, extended colors, and formatting codes
+     */
+    const cleanText = (text: string) => 
+      text?.replace(/[\u001b\x1b]\[[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '') || '';
     
     // Sanitize incoming error and log chunk
     if (test_entry.error) test_entry.error = cleanText(test_entry.error);
@@ -47,33 +51,36 @@ export async function POST(req: Request) {
         // --- UPDATE EXISTING TEST ---
         const existingTest = updatedTests[testIndex];
         
+        // Extract existing logs to ensure we don't overwrite them with test_entry.logs
+        const currentLogs = Array.isArray(existingTest.logs) ? existingTest.logs : [];
+        
         updatedTests[testIndex] = {
-          ...existingTest, // Preserve existing data (like early logs)
-          ...test_entry,   // Apply new data (status, duration, error)
+          ...existingTest, 
+          ...test_entry,   
           
-          // 🔥 PROTECTION: Keep the video URL if it was already saved
-          // This prevents a late log update from overwriting a valid URL with null
+          // PROTECTION: Keep existing video URL if the update is just a log/status change
           video_url: test_entry.video_url || existingTest.video_url || null,
           
-          // 🔥 PROTECTION: Maintain the run/retry number
+          // PROTECTION: Maintain the run/retry number
           run_number: test_entry.run_number || existingTest.run_number || 1,
 
-          // 🔥 PROTECTION: Append logs safely
+          // 🔥 ATOMIC LOG APPENDING: 
+          // 1. We take existing logs.
+          // 2. If a new log_chunk is provided, we add it.
+          // 3. We ignore test_entry.logs if it's an empty array (common in start events).
           logs: sanitizedLog 
-            ? [...(existingTest.logs || []), sanitizedLog] 
-            : (existingTest.logs || [])
+            ? [...currentLogs, sanitizedLog] 
+            : currentLogs
         };
       } else {
         // --- INSERT NEW TEST ---
-        // Initialize the test object in the array for the first time
         updatedTests.push({
           ...test_entry,
-          logs: sanitizedLog ? [sanitizedLog] : []
+          logs: sanitizedLog ? [sanitizedLog] : (test_entry.logs || [])
         });
       }
 
-      // 4. Atomic Upsert
-      // This uses the unique constraint on (build_id, spec_file)
+      // 4. Atomic Upsert back to the database
       await tx.insert(testResults)
         .values({
           buildId: build_id,
