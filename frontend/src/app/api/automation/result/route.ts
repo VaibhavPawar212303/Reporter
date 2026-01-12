@@ -18,20 +18,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Build ID ${build_id} not found.` }, { status: 400 });
     }
 
-    /**
-     * 2. Improved Utility to clean terminal color codes (ANSI)
-     * Handles standard colors, extended colors, and formatting codes
-     */
+    // 2. Improved Utility to clean terminal color codes (ANSI)
     const cleanText = (text: string) => 
       text?.replace(/[\u001b\x1b]\[[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '') || '';
     
-    // Sanitize incoming error and log chunk
     if (test_entry.error) test_entry.error = cleanText(test_entry.error);
     const sanitizedLog = log_chunk ? cleanText(log_chunk) : null;
 
-    // 3. Start Transaction: Critical for multiple parallel workers
+    // 3. Start Transaction: Critical for 4+ parallel workers
     return await db.transaction(async (tx) => {
-      // Find the row for this specific Spec file in this Build
       const existingRecord = await tx.query.testResults.findFirst({
         where: and(
           eq(testResults.buildId, build_id),
@@ -41,39 +36,43 @@ export async function POST(req: Request) {
 
       let updatedTests = existingRecord ? (existingRecord.tests as any[]) : [];
       
-      // Identify the specific test using BOTH Title and Project
+      /**
+       * 🔥 UNIQUE IDENTIFICATION FIX:
+       * To track each individual execution (including retries), we find the test using:
+       * 1. Title
+       * 2. Project (Browser)
+       * 3. Run Number (Attempt 1, 2, 3...)
+       */
       const testIndex = updatedTests.findIndex((t) => 
         t.title === test_entry.title && 
-        t.project === test_entry.project
+        t.project === test_entry.project &&
+        Number(t.run_number) === Number(test_entry.run_number)
       );
 
       if (testIndex !== -1) {
-        // --- UPDATE EXISTING TEST ---
+        // --- UPDATE EXISTING ATTEMPT ---
         const existingTest = updatedTests[testIndex];
-        
-        // Extract existing logs to ensure we don't overwrite them with test_entry.logs
         const currentLogs = Array.isArray(existingTest.logs) ? existingTest.logs : [];
         
         updatedTests[testIndex] = {
           ...existingTest, 
           ...test_entry,   
           
-          // PROTECTION: Keep existing video URL if the update is just a log/status change
+          // 🔥 PROTECTION: Video persistence
           video_url: test_entry.video_url || existingTest.video_url || null,
           
-          // PROTECTION: Maintain the run/retry number
+          // 🔥 PROTECTION: Maintain the same run number
           run_number: test_entry.run_number || existingTest.run_number || 1,
 
           // 🔥 ATOMIC LOG APPENDING: 
-          // 1. We take existing logs.
-          // 2. If a new log_chunk is provided, we add it.
-          // 3. We ignore test_entry.logs if it's an empty array (common in start events).
+          // Always append new chunks to the correct worker's run history
           logs: sanitizedLog 
             ? [...currentLogs, sanitizedLog] 
             : currentLogs
         };
       } else {
-        // --- INSERT NEW TEST ---
+        // --- INSERT NEW ATTEMPT ---
+        // This triggers when a new worker starts a test OR when a retry (Run 2/3) starts
         updatedTests.push({
           ...test_entry,
           logs: sanitizedLog ? [sanitizedLog] : (test_entry.logs || [])
