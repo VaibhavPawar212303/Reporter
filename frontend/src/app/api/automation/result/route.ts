@@ -15,17 +15,70 @@ export async function POST(req: Request) {
 
     if (!buildExists) {
       console.error(`❌ Build ID ${build_id} not found in Database.`);
-      return NextResponse.json({ error: `Build ID ${build_id} not found.` }, { status: 400 });
+      return NextResponse.json(
+        { error: `Build ID ${build_id} not found.` }, 
+        { status: 400 }
+      );
     }
 
-    // 2. Improved Utility to clean terminal color codes (ANSI)
-    const cleanText = (text: string) => 
-      text?.replace(/[\u001b\x1b]\[[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '') || '';
-    
-    if (test_entry.error) test_entry.error = cleanText(test_entry.error);
+    // 2. Utility to clean terminal color codes (ANSI)
+    // ✅ FIXED: Only cleans strings, safely handles any input
+    const cleanText = (text: any): string => {
+      if (!text) return '';
+      if (typeof text !== 'string') return String(text);
+      
+      return text.replace(
+        /[\u001b\x1b]\[[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, 
+        ''
+      );
+    };
+
+    // 3. ✅ FIXED: Properly sanitize test_entry fields
+    if (test_entry) {
+      // Clean individual string fields in test_entry
+      if (test_entry.title) test_entry.title = cleanText(test_entry.title);
+      if (test_entry.file) test_entry.file = cleanText(test_entry.file);
+      if (test_entry.project) test_entry.project = cleanText(test_entry.project);
+      
+      // ✅ CRITICAL FIX: Handle error object properly
+      if (test_entry.error && typeof test_entry.error === 'object') {
+        test_entry.error = {
+          message: cleanText(test_entry.error.message),
+          stack: cleanText(test_entry.error.stack),
+          location: test_entry.error.location // Keep location as-is
+        };
+      } else if (test_entry.error) {
+        // If error is somehow a string, clean it
+        test_entry.error = cleanText(test_entry.error);
+      }
+
+      // ✅ Handle attachments if present
+      if (test_entry.attachments) {
+        if (test_entry.attachments.paths) {
+          test_entry.attachments.paths = {
+            video: cleanText(test_entry.attachments.paths.video),
+            screenshot: cleanText(test_entry.attachments.paths.screenshot),
+            trace: cleanText(test_entry.attachments.paths.trace)
+          };
+        }
+      }
+
+      // ✅ Handle steps if present
+      if (Array.isArray(test_entry.steps)) {
+        //@ts-ignore
+        test_entry.steps = test_entry.steps.map(step => ({
+          ...step,
+          title: cleanText(step.title),
+          category: cleanText(step.category),
+          status: cleanText(step.status)
+        }));
+      }
+    }
+
+    // Clean log chunk
     const sanitizedLog = log_chunk ? cleanText(log_chunk) : null;
 
-    // 3. Start Transaction: Critical for 4+ parallel workers
+    // 4. Start Transaction: Critical for 4+ parallel workers
     return await db.transaction(async (tx) => {
       const existingRecord = await tx.query.testResults.findFirst({
         where: and(
@@ -37,7 +90,7 @@ export async function POST(req: Request) {
       let updatedTests = existingRecord ? (existingRecord.tests as any[]) : [];
       
       /**
-       * 🔥 UNIQUE IDENTIFICATION FIX:
+       * 🔥 UNIQUE IDENTIFICATION:
        * To track each individual execution (including retries), we find the test using:
        * 1. Title
        * 2. Project (Browser)
@@ -79,7 +132,7 @@ export async function POST(req: Request) {
         });
       }
 
-      // 4. Atomic Upsert back to the database
+      // 5. Atomic Upsert back to the database
       await tx.insert(testResults)
         .values({
           buildId: build_id,
@@ -92,11 +145,22 @@ export async function POST(req: Request) {
           set: { tests: updatedTests },
         });
 
-      return NextResponse.json({ success: true });
+      console.log(`✅ Test recorded successfully for Build ${build_id}, Spec ${spec_file}`);
+      return NextResponse.json({ 
+        success: true,
+        message: 'Test result recorded'
+      });
     });
 
   } catch (error: any) {
     console.error("❌ API TRANSACTION ERROR:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Stack:", error.stack);
+    return NextResponse.json(
+      { 
+        error: error.message,
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      }, 
+      { status: 500 }
+    );
   }
 }
