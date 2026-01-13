@@ -1,64 +1,68 @@
-// _components/LogTerminal.tsx
+// src/app/(route)/playwright/dashboard/_components/LogTerminal.tsx
 import React, { useEffect, useRef } from "react";
+import { Terminal } from "lucide-react";
 
 export function LogTerminal({ logs, status }: { logs: string[], status: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isRunning = status === 'running';
 
   useEffect(() => {
-    // Only auto-scroll to the bottom if the test is currently running
+    // Only auto-scroll to the bottom if the test is currently running.
+    // This allows users to read previous logs of finished tests without jumping.
     if (isRunning && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [logs, isRunning]);
 
   return (
-    <div className="rounded-2xl border border-white/5 bg-[#050505] overflow-hidden shadow-inner">
+    <div className="mt-4 overflow-hidden rounded-2xl border border-white/5 bg-[#050505] shadow-2xl">
       {/* Terminal Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 bg-white/[0.02]">
+      <div className="flex items-center justify-between border-b border-white/5 bg-white/5 px-4 py-2">
         <div className="flex items-center gap-2">
-            <div className={`w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-indigo-500 animate-pulse' : 'bg-zinc-700'}`} />
-            <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-widest">
-                {isRunning ? 'Streaming...' : 'Execution log'}
-            </span>
+          <Terminal className="w-3 h-3 text-zinc-500" />
+          <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">
+            {isRunning ? 'Live Worker Output' : 'Execution Log History'}
+          </span>
         </div>
-        <span className="text-[8px] font-mono text-zinc-600 uppercase tracking-tighter">
-            {logs.length} lines
-        </span>
+        <div className="flex gap-1.5">
+          <div className={`w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-indigo-500 animate-pulse' : 'bg-zinc-800'}`} />
+          <div className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
+          <div className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
+        </div>
       </div>
 
       {/* Terminal Body */}
       <div 
-        ref={scrollRef} 
-        className="p-5 font-mono text-[11px] max-h-80 overflow-y-auto leading-relaxed scroll-smooth custom-scrollbar select-text"
+        ref={scrollRef}
+        className="max-h-80 overflow-y-auto p-4 font-mono text-[11px] leading-relaxed scroll-smooth custom-scrollbar select-text"
       >
         {logs.length === 0 && isRunning && (
-          <div className="text-zinc-700 italic">Initializing worker... waiting for output</div>
+          <div className="text-zinc-600 italic">Initializing worker... waiting for output</div>
         )}
-
+        
         {logs.map((log, i) => {
-          // Simple highlighting for common terms
-          const isError = /error|failed|exception|🔴|❌/i.test(log);
-          const isSuccess = /success|passed|✅/i.test(log);
+          // Detect step markers or errors for coloring
+          const isStep = log.includes('⏭️') || log.includes('📝');
+          const isError = /error|failed|🔴/i.test(log);
 
           return (
-            <div key={i} className="flex gap-4 mb-0.5 group">
+            <div key={i} className="flex gap-4 mb-1 group">
               <span className="text-zinc-800 select-none w-5 text-right italic font-light">{i + 1}</span>
               <span className={`whitespace-pre-wrap ${
-                isError ? 'text-red-400' : isSuccess ? 'text-green-400' : 'text-zinc-400'
+                isError ? 'text-red-400' : isStep ? 'text-indigo-300' : 'text-zinc-400'
               }`}>
                 {log}
               </span>
             </div>
           );
         })}
-        
+
         {/* Blinking cursor for live mode */}
         {isRunning && (
-            <div className="flex gap-4 items-center mt-1">
-                <span className="text-zinc-800 select-none w-5 text-right italic">{logs.length + 1}</span>
-                <div className="w-1.5 h-4 bg-indigo-500 animate-pulse" />
-            </div>
+          <div className="flex gap-4 items-center mt-2">
+             <span className="text-zinc-800 select-none w-5 text-right italic">{logs.length + 1}</span>
+             <div className="w-1.5 h-3.5 bg-indigo-500 animate-pulse" />
+          </div>
         )}
       </div>
     </div>
