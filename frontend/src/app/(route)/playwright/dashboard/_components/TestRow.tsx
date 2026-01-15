@@ -1,4 +1,3 @@
-// src/app/(route)/playwright/dashboard/_components/TestRow.tsx
 import React from "react";
 import { 
   CheckCircle2, XCircle, Loader2, ChevronDown, ChevronRight, 
@@ -9,6 +8,7 @@ import { LogTerminal } from "./LogTerminal";
 import { cn } from "@/lib/utils";
 
 export function TestRow({ test, isExpanded, onToggle }: any) {
+  const [stepsExpanded, setStepsExpanded] = React.useState(false);
   const videoUrl = test.attachments?.paths?.video || test.video_url;
   const screenshotUrl = test.attachments?.paths?.screenshot;
   const hasLogs = (test.stdout_logs?.length || 0) + (test.stderr_logs?.length || 0) > 0;
@@ -61,17 +61,24 @@ export function TestRow({ test, isExpanded, onToggle }: any) {
           {/* 🔥 NEW: Live Logs Terminal - Now appears FIRST for better visibility */}
           {hasLogs && <LogTerminal test={test} />}
 
-          {/* Execution Steps Timeline */}
+          {/* Execution Steps Timeline - Collapsible */}
           {test.steps?.length > 0 && (
             <div className="ml-12 space-y-4">
-               <div className="flex items-center gap-2 text-zinc-500 uppercase text-[10px] font-black tracking-widest">
-                  <ListTree className="w-4 h-4" /> Execution Steps
-               </div>
-               <div className="space-y-2">
-                  {test.steps.map((step: any, sIdx: number) => (
-                    <StepItem key={sIdx} step={step} depth={0} />
-                  ))}
-               </div>
+               <button
+                 onClick={() => setStepsExpanded(!stepsExpanded)}
+                 className="flex items-center gap-2 text-zinc-500 uppercase text-[10px] font-black tracking-widest hover:text-zinc-400 transition-colors"
+               >
+                 {stepsExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                 <ListTree className="w-4 h-4" /> Execution Steps ({test.steps.length})
+               </button>
+               
+               {stepsExpanded && (
+                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                    {test.steps.map((step: any, sIdx: number) => (
+                      <StepItem key={sIdx} step={step} depth={0} />
+                    ))}
+                 </div>
+               )}
             </div>
           )}
 
