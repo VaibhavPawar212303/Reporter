@@ -8,7 +8,6 @@ export const automationBuilds = pgTable('automation_builds', {
   environment: text('environment').default('dev'),
   type: text('type'), // 🔥 New column: stores 'playwright' or 'cypress'
 });
-
 export const testResults = pgTable('test_results', {
   id: serial('id').primaryKey(),
   buildId: integer('build_id').references(() => automationBuilds.id, { onDelete: 'cascade' }),
@@ -19,7 +18,6 @@ export const testResults = pgTable('test_results', {
   // CONCURRENCY CONTROL: Prevents race conditions during parallel execution
   buildSpecUnique: unique().on(table.buildId, table.specFile),
 }));
-
 export const testCases = pgTable('test_cases', {
   id: serial('id').primaryKey(),
   caseCode: text('case_code').notNull().unique(), // e.g., TC5073
@@ -40,12 +38,9 @@ export const testCases = pgTable('test_cases', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
-
-
 export const buildsRelations = relations(automationBuilds, ({ many }) => ({
   results: many(testResults),
 }));
-
 export const resultsRelations = relations(testResults, ({ one }) => ({
   build: one(automationBuilds, {
     fields: [testResults.buildId],
