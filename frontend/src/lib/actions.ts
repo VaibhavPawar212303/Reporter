@@ -1,6 +1,6 @@
 "use server"
 
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, inArray } from 'drizzle-orm';
 import { automationBuilds, testCases, testResults } from '../../db/schema';
 import { revalidatePath } from "next/cache";
 import { db } from '../../db';
@@ -169,7 +169,7 @@ export async function getTestSteps(specId: number, testTitle: string) {
     if (!record || !Array.isArray(record.tests)) return null;
 
     const specificTest = record.tests.find((t: any) => t.title === testTitle);
-    
+
     return {
       steps: specificTest?.steps || [],
       stack_trace: specificTest?.error?.stack || null
@@ -177,5 +177,65 @@ export async function getTestSteps(specId: number, testTitle: string) {
   } catch (error) {
     console.error(`❌ Error fetching steps for spec ${specId}:`, error);
     return null;
+  }
+}
+
+export async function getPlaywrightTrend() {
+  try {
+    // 1. Fetch the last 10 Playwright builds first (Lightweight)
+    const builds = await db
+      .select({
+        id: automationBuilds.id,
+        createdAt: automationBuilds.createdAt,
+      })
+      .from(automationBuilds)
+      .where(eq(automationBuilds.type, 'playwright'))
+      .orderBy(desc(automationBuilds.id))
+      .limit(10);
+
+    if (builds.length === 0) return [];
+
+    const buildIds = builds.map((b) => b.id);
+
+    // 2. Fetch all test results for these 10 builds in one query
+    const results = await db
+      .select()
+      .from(testResults)
+      .where(inArray(testResults.buildId, buildIds));
+
+    // 3. Aggregate data in JavaScript (No Lateral Join needed)
+    const trendData = builds.map((b) => {
+      let passed = 0;
+      let total = 0;
+
+      // Find all spec results belonging to this build
+      const buildSpecs = results.filter((r) => r.buildId === b.id);
+
+      buildSpecs.forEach((spec) => {
+        // spec.tests is the JSON array from TiDB
+        if (Array.isArray(spec.tests)) {
+          spec.tests.forEach((t: any) => {
+            total++;
+            // Support both Playwright/Cypress status strings
+            const status = t.status?.toLowerCase();
+            if (status === 'passed' || status === 'expected' || status === 'success') {
+              passed++;
+            }
+          });
+        }
+      });
+
+      return {
+        name: `#${b.id}`,
+        passed,
+        total,
+      };
+    });
+
+    // Reverse so the chart flows from Oldest to Newest (Left to Right)
+    return trendData.reverse();
+  } catch (error: any) {
+    console.error("❌ Trend Fetch Error:", error.message);
+    return [];
   }
 }
