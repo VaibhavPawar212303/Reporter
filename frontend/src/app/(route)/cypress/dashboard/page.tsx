@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { getBuildHistory, getBuildDetails, getMasterTestCases, getTestSteps } from "@/lib/actions";
 import { 
   Loader2, Zap, Target, CheckCircle2, XCircle, FileText, 
-  Activity, ListFilter, ChevronRight, AlertTriangle 
+  Activity, ListFilter, AlertTriangle 
 } from "lucide-react";
 import { StatusBadge } from "./_components/StatusBadge";
 import { DashboardHeader } from "./_components/DashboardHeader";
@@ -20,17 +20,19 @@ export default function AutomationDashboard() {
   
   const [loading, setLoading] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
-  const [quotaError, setQuotaError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   
   const [expandedTests, setExpandedTests] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<'all' | 'passed' | 'failed' | 'running'>('all');
   const [specSearch, setSpecSearch] = useState('');
 
-  // 1. Initial Load: Fetch Lightweight History
+  // 1. Initial Load: Fetch History from TiDB
   const loadInitialData = useCallback(async () => {
     try {
       setLoading(true);
       const [history, master] = await Promise.all([getBuildHistory(), getMasterTestCases()]);
+      
+      // Filter for Cypress type (as defined in our TiDB Schema)
       const onlyCypress = history.filter((b: any) => b.type === 'cypress');
       setBuilds(onlyCypress);
       setMasterCases(master);
@@ -39,48 +41,44 @@ export default function AutomationDashboard() {
         handleBuildSelect(onlyCypress[0].id);
       }
     } catch (e: any) {
-      if (e.message?.includes('egress_quota')) setQuotaError(true);
+      setError("Failed to connect to TiDB Cluster");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // 2. Focused Fetch: Get test list WITHOUT heavy steps
+  // 2. Focused Fetch: Get spec list for a specific build
   const handleBuildSelect = async (buildId: number) => {
     setLoadingDetails(true);
-    setExpandedTests([]); // Reset expansions for performance
+    setExpandedTests([]); 
     try {
       const details = await getBuildDetails(buildId);
       setSelectedBuild(builds.find(b => b.id === buildId));
       setBuildDetails(details);
     } catch (e: any) {
-      if (e.message?.includes('egress_quota')) setQuotaError(true);
+      setError("Error fetching build details");
     } finally {
       setLoadingDetails(false);
     }
   };
 
-  // 3. Lazy Load Steps: Fetch only when a user clicks expand
-  const toggleTest = async (uiId: string, dbTestId: string) => {
+  // 3. Lazy Load Steps: Extract from TiDB JSON column
+  const toggleTest = async (uiId: string, specRecordId: number, testTitle: string) => {
     const isOpening = !expandedTests.includes(uiId);
     
-    // Toggle UI immediately
     setExpandedTests(prev => 
       prev.includes(uiId) ? prev.filter(x => x !== uiId) : [...prev, uiId]
     );
 
     if (isOpening) {
-      // Find the test in our current state
-      const specFileName = uiId.split('--')[0]; // Assuming ID structure: SpecName--TestTitle--ID
-      
-      // Fetch steps if they don't exist in local state
       try {
-        const data = await getTestSteps(dbTestId);
+        // We call TiDB to get the 'steps' and 'stack_trace' from the JSON blob
+        const data = await getTestSteps(specRecordId, testTitle);
         if (data) {
           setBuildDetails((prev: any) => {
             const newResults = [...prev.results];
-            const spec = newResults.find(r => r.specFile === specFileName);
-            const testObj = spec?.tests.find((t: any) => t.id === dbTestId);
+            const spec = newResults.find(r => r.id === specRecordId);
+            const testObj = spec?.tests.find((t: any) => t.title === testTitle);
             if (testObj) {
               testObj.steps = data.steps;
               testObj.stack_trace = data.stack_trace;
@@ -98,52 +96,70 @@ export default function AutomationDashboard() {
     loadInitialData();
   }, [loadInitialData]);
 
-  // Optimized grouping & metrics
+  // Optimized grouping & metrics for TiDB JSON structure
   const buildMetrics = useMemo(() => {
     if (!buildDetails) return null;
     let p = 0, f = 0, r = 0;
     const automatedCodes = new Set<string>();
+
     buildDetails.results?.forEach((spec: any) => {
-      spec.tests.forEach((t: any) => {
-        if (t.status === 'passed') p++; else if (t.status === 'running') r++; else f++;
-        t.case_codes?.forEach((c: string) => c !== 'N/A' && automatedCodes.add(c));
+      // spec.tests is the JSON array from TiDB
+      spec.tests?.forEach((t: any) => {
+        if (t.status === 'passed') p++; 
+        else if (t.status === 'running') r++; 
+        else f++;
+        
+        t.case_codes?.forEach((c: string) => {
+            if (c && c !== 'N/A') automatedCodes.add(c);
+        });
       });
     });
-    return { passed: p, failed: f, running: r, automated: automatedCodes.size, percent: Math.round((automatedCodes.size / (masterCases.length || 1)) * 100) };
+
+    return { 
+      passed: p, 
+      failed: f, 
+      running: r, 
+      automated: automatedCodes.size, 
+      percent: Math.round((automatedCodes.size / (masterCases.length || 1)) * 100) 
+    };
   }, [buildDetails, masterCases.length]);
 
   const specGroups = useMemo(() => {
     if (!buildDetails?.results) return {};
     return buildDetails.results.reduce((acc: any, res: any) => {
-      const tests = res.tests.filter((t: any) => {
+      const filteredTests = res.tests?.filter((t: any) => {
         const mStatus = filterStatus === 'all' || t.status === filterStatus;
         const mSearch = !specSearch || res.specFile.toLowerCase().includes(specSearch.toLowerCase());
         return mStatus && mSearch;
       });
-      if (tests.length > 0) acc[res.specFile] = { tests };
+
+      if (filteredTests?.length > 0) {
+        acc[res.specFile] = { id: res.id, tests: filteredTests };
+      }
       return acc;
     }, {});
   }, [buildDetails, filterStatus, specSearch]);
 
-  if (quotaError) return (
+  if (error) return (
     <div className="h-screen flex flex-col items-center justify-center bg-[#09090b] p-10 text-center">
       <AlertTriangle className="w-16 h-16 text-rose-500 mb-6" />
-      <h1 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Database Restricted</h1>
-      <p className="text-zinc-500 max-w-md text-sm leading-relaxed">Your Supabase project has exceeded its egress bandwidth quota. Data fetching is temporarily disabled by the provider.</p>
+      <h1 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">System Error</h1>
+      <p className="text-zinc-500 max-w-md text-sm leading-relaxed">{error}</p>
+      <button onClick={() => window.location.reload()} className="mt-6 text-xs font-bold text-indigo-400 underline uppercase tracking-widest">Retry Connection</button>
     </div>
   );
 
   if (loading) return (
     <div className="h-screen flex flex-col items-center justify-center bg-[#09090b] gap-4">
       <Loader2 className="animate-spin text-indigo-500 w-10 h-10" />
-      <span className="text-zinc-500 font-black text-[10px] uppercase tracking-[0.2em]">Initializing Systems</span>
+      <span className="text-zinc-500 font-black text-[10px] uppercase tracking-[0.2em]">TiDB Cluster Handshake...</span>
     </div>
   );
 
   return (
     <div className="flex h-screen bg-[#09090b] text-zinc-300 font-sans overflow-hidden">
       
-      {/* Sidebar */}
+      {/* Sidebar - Build History */}
       <aside className="w-72 border-r border-white/5 flex flex-col bg-[#0b0b0d] shrink-0">
         <div className="p-6 border-b border-white/5 flex items-center justify-between">
           <span className="font-black text-[10px] uppercase tracking-widest text-zinc-500">Run History</span>
@@ -187,7 +203,7 @@ export default function AutomationDashboard() {
           {loadingDetails ? (
             <div className="h-64 flex flex-col items-center justify-center gap-4">
               <Loader2 className="animate-spin text-indigo-500 w-6 h-6" />
-              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Compiling Build Results...</span>
+              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Querying TiDB Storage...</span>
             </div>
           ) : (
             <>
@@ -204,7 +220,7 @@ export default function AutomationDashboard() {
               <div className="flex flex-wrap gap-2 p-4 bg-white/5 rounded-3xl border border-white/5">
                 <div className="flex items-center gap-2 mr-4 text-zinc-600">
                   <ListFilter className="w-3 h-3" />
-                  <span className="text-[10px] font-black uppercase tracking-widest">Jump to:</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest">Jump to Spec:</span>
                 </div>
                 {Object.keys(specGroups).map(name => (
                   <button 
@@ -219,7 +235,7 @@ export default function AutomationDashboard() {
 
               {/* Specs & Tests */}
               <div className="space-y-24 pb-20">
-                {Object.entries(specGroups).map(([name, data]: [string, any]) => (
+                {Object.entries(specGroups).map(([name, group]: [string, any]) => (
                   <div key={name} id={name} className="space-y-8 scroll-mt-40">
                     <div className="flex items-center justify-between px-2">
                       <div className="flex items-center gap-3 border-l-2 border-indigo-500 pl-4">
@@ -229,14 +245,15 @@ export default function AutomationDashboard() {
                     </div>
                     
                     <div className="grid grid-cols-1 gap-6">
-                      {data.tests.map((test: any, idx: number) => {
+                      {group.tests.map((test: any, idx: number) => {
                         const uiId = `${name}--${test.title}--${idx}`;
                         return (
                           <TestResultCard 
                             key={uiId} 
                             test={test} 
                             isExpanded={expandedTests.includes(uiId)} 
-                            onToggle={() => toggleTest(uiId, test.id)} 
+                            // Passing the spec record ID and the test title to retrieve JSON logs
+                            onToggle={() => toggleTest(uiId, group.id, test.title)} 
                           />
                         );
                       })}
