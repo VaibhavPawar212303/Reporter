@@ -18,9 +18,9 @@ export async function getBuildHistory() {
       createdAt: automationBuilds.createdAt,
       type: automationBuilds.type
     })
-    .from(automationBuilds)
-    .orderBy(desc(automationBuilds.id))
-    .limit(30);
+      .from(automationBuilds)
+      .orderBy(desc(automationBuilds.id))
+      .limit(30);
   } catch (error) {
     console.error("Database Fetch Error:", error);
     return [];
@@ -111,17 +111,14 @@ export async function updateTestCase(id: number, data: any) {
   }
 }
 
-/**
- * 5. Dashboard Stats
- * Relational query works with TiDB if schema is passed to drizzle()
- */
 export async function getDashboardStats() {
   try {
-    const allBuilds = await db.query.automationBuilds.findMany({
-      with: { results: true }
-    });
+    // Fetch builds and cases separately
+    const allBuilds = await db.query.automationBuilds.findMany();
     const allMasterCases = await db.query.testCases.findMany();
 
+    // If you specifically need the count of results per build, 
+    // you can fetch testResults separately or use a standard join.
     return {
       totalBuilds: allBuilds.length,
       totalRequirements: allMasterCases.length,
@@ -129,47 +126,40 @@ export async function getDashboardStats() {
       masterCases: allMasterCases
     };
   } catch (error) {
+    console.error("Dashboard Stats Error:", error);
     return { totalBuilds: 0, totalRequirements: 0, builds: [], masterCases: [] };
   }
 }
 
-/**
- * 6. Get Build Details
- * ✅ CONVERTED: From Supabase to TiDB/Drizzle
- * In TiDB, we query 'testResults' based on the 'buildId'
- */
 export async function getBuildDetails(buildId: number) {
   try {
-    const data = await db.query.automationBuilds.findFirst({
+    // Query 1: Get the build metadata
+    const build = await db.query.automationBuilds.findFirst({
       where: eq(automationBuilds.id, buildId),
-      with: {
-        results: true // This fetches all rows from 'test_results' for this build
-      }
     });
 
-    if (!data) return null;
+    if (!build) return null;
 
+    // Query 2: Get the spec results associated with this build
+    const results = await db.query.testResults.findMany({
+      where: eq(testResults.buildId, buildId),
+    });
+
+    // Manually combine them to match the expected frontend structure
     return {
-      ...data,
-      // Mapping to match your frontend expected structure
-      results: data.results.map((spec) => ({
+      ...build,
+      results: results.map((spec) => ({
         id: spec.id,
         specFile: spec.specFile,
-        // In TiDB we stored tests as a JSON array in the 'tests' column
-        tests: spec.tests || [] 
+        tests: spec.tests || []
       }))
     };
-  } catch (error) {
-    console.error(`❌ Error fetching details for build ${buildId}:`, error);
+  } catch (error: any) {
+    console.error(`❌ Error fetching details for build ${buildId}:`, error.message);
     return null;
   }
 }
 
-/**
- * 7. Get Test Steps 
- * ✅ CONVERTED: From Supabase to TiDB/Drizzle
- * Since steps are stored inside the JSON column 'tests' in 'test_results'
- */
 export async function getTestSteps(specId: number, testTitle: string) {
   try {
     const record = await db.query.testResults.findFirst({
@@ -178,7 +168,6 @@ export async function getTestSteps(specId: number, testTitle: string) {
 
     if (!record || !Array.isArray(record.tests)) return null;
 
-    // Find the specific test inside the JSON array
     const specificTest = record.tests.find((t: any) => t.title === testTitle);
     
     return {
