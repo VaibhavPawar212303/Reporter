@@ -16,27 +16,27 @@ export default function AutomationDashboard() {
   // --- State Management ---
   const [builds, setBuilds] = useState<any[]>([]);
   const [masterCases, setMasterCases] = useState<any[]>([]);
-  const [selectedBuild, setSelectedBuild] = useState<any>(null);
-  const [buildDetails, setBuildDetails] = useState<any>(null);
+  const [selectedBuild, setSelectedBuild] = useState<any>(null); // Basic sidebar info
+  const [buildDetails, setBuildDetails] = useState<any>(null);   // Full TiDB data
   
   const [loading, setLoading] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
+  // Filtering States
   const [expandedTests, setExpandedTests] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<'all' | 'passed' | 'failed' | 'running'>('all');
   const [specSearch, setSpecSearch] = useState('');
+  const [projectSearch, setProjectSearch] = useState(''); // 🔥 Added missing project state
 
   /**
    * 1. Initial Load: Fetch History
-   * Optimized to fetch only the metadata for the sidebar.
    */
   const loadInitialData = useCallback(async () => {
     try {
       setLoading(true);
       const [history, master] = await Promise.all([getBuildHistory(), getMasterTestCases()]);
       
-      // Filter for Cypress runs
       const onlyCypress = history.filter((b: any) => b.type === 'cypress');
       setBuilds(onlyCypress);
       setMasterCases(master);
@@ -52,16 +52,17 @@ export default function AutomationDashboard() {
   }, []);
 
   /**
-   * 2. Detailed Fetch: Build Specs
-   * Fetches the rows from the 'test_results' table for the selected build.
+   * 2. Detailed Fetch: Fetch results for a specific Build
    */
   const handleBuildSelect = async (buildId: number) => {
     setLoadingDetails(true);
-    setExpandedTests([]); // Reset expansions for performance
+    setExpandedTests([]); 
+    // Set basic info immediately so the header shows "Build #123" instantly
+    setSelectedBuild(builds.find(b => b.id === buildId));
+    
     try {
       const details = await getBuildDetails(buildId);
-      setSelectedBuild(builds.find(b => b.id === buildId));
-      setBuildDetails(details);
+      setBuildDetails(details); // Populate metrics and results
     } catch (e: any) {
       setError("Error retrieving build specifications");
     } finally {
@@ -70,8 +71,7 @@ export default function AutomationDashboard() {
   };
 
   /**
-   * 3. Lazy Load Steps (Log Extraction)
-   * Fetches heavy log/step data from the TiDB JSON blob only on click.
+   * 3. Lazy Load Steps (Log Extraction from TiDB JSON)
    */
   const toggleTest = async (uiId: string, specRecordId: number, testTitle: string) => {
     const isOpening = !expandedTests.includes(uiId);
@@ -82,7 +82,6 @@ export default function AutomationDashboard() {
 
     if (isOpening) {
       try {
-        // Find specific logs inside the JSON column on the server
         const data = await getTestSteps(specRecordId, testTitle);
         if (data) {
           setBuildDetails((prev: any) => {
@@ -108,7 +107,7 @@ export default function AutomationDashboard() {
 
   /**
    * Derived State: Metrics
-   * Calculates pass/fail/automated coverage using the master cases list.
+   * Passes/Fails calculated from the full buildDetails object
    */
   const buildMetrics = useMemo(() => {
     if (!buildDetails) return null;
@@ -117,8 +116,9 @@ export default function AutomationDashboard() {
 
     buildDetails.results?.forEach((spec: any) => {
       spec.tests?.forEach((t: any) => {
-        if (t.status === 'passed') p++; 
-        else if (t.status === 'running') r++; 
+        const status = t.status?.toLowerCase();
+        if (status === 'passed' || status === 'success') p++; 
+        else if (status === 'running') r++; 
         else f++;
         
         t.case_codes?.forEach((c: string) => {
@@ -137,16 +137,23 @@ export default function AutomationDashboard() {
   }, [buildDetails, masterCases.length]);
 
   /**
-   * Derived State: Grouping
-   * Filters and groups tests by their spec file name.
+   * Derived State: Grouping & Filtering
+   * Filters by Status, Spec Name, and Project (Browser)
    */
   const specGroups = useMemo(() => {
     if (!buildDetails?.results) return {};
     return buildDetails.results.reduce((acc: any, res: any) => {
       const filteredTests = res.tests?.filter((t: any) => {
+        // Status Filter
         const mStatus = filterStatus === 'all' || t.status === filterStatus;
+        
+        // Spec Name Search
         const mSearch = !specSearch || res.specFile.toLowerCase().includes(specSearch.toLowerCase());
-        return mStatus && mSearch;
+        
+        // Project/Browser Search
+        const mProject = !projectSearch || (t.project && t.project.toLowerCase().includes(projectSearch.toLowerCase()));
+        
+        return mStatus && mSearch && mProject;
       });
 
       if (filteredTests?.length > 0) {
@@ -154,28 +161,28 @@ export default function AutomationDashboard() {
       }
       return acc;
     }, {});
-  }, [buildDetails, filterStatus, specSearch]);
+  }, [buildDetails, filterStatus, specSearch, projectSearch]);
 
   if (error) return (
     <div className="h-screen flex flex-col items-center justify-center bg-[#09090b] p-10 text-center">
       <AlertTriangle className="w-16 h-16 text-rose-500 mb-6" />
       <h1 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Network Error</h1>
       <p className="text-zinc-500 max-w-md text-sm leading-relaxed">{error}</p>
-      <button onClick={() => window.location.reload()} className="mt-6 text-xs font-bold text-indigo-400 underline uppercase tracking-widest">Re-establish Connection</button>
+      <button onClick={() => window.location.reload()} className="mt-6 text-xs font-bold text-indigo-400 underline uppercase tracking-widest">Retry Connection</button>
     </div>
   );
 
   if (loading) return (
     <div className="h-screen flex flex-col items-center justify-center bg-[#09090b] gap-4">
       <Loader2 className="animate-spin text-indigo-500 w-10 h-10" />
-      <span className="text-zinc-500 font-black text-[10px] uppercase tracking-[0.2em]">Authenticating Cluster</span>
+      <span className="text-zinc-500 font-black text-[10px] uppercase tracking-[0.2em]">TiDB Handshake...</span>
     </div>
   );
 
   return (
     <div className="flex h-screen bg-[#09090b] text-zinc-300 font-sans overflow-hidden">
       
-      {/* Sidebar: Build Browser */}
+      {/* Sidebar */}
       <aside className="w-72 border-r border-white/5 flex flex-col bg-[#0b0b0d] shrink-0">
         <div className="p-6 border-b border-white/5 flex items-center justify-between">
           <span className="font-black text-[10px] uppercase tracking-widest text-zinc-500">Run History</span>
@@ -196,29 +203,28 @@ export default function AutomationDashboard() {
                 <span className="text-sm font-black text-white uppercase tracking-tighter">Build #{b.id}</span>
                 <StatusBadge status={b.status} />
               </div>
-              <p className="text-[10px] text-zinc-600 font-mono uppercase">
-                {new Date(b.createdAt).toLocaleDateString()}
-              </p>
+              <p className="text-[10px] text-zinc-600 font-mono uppercase">{new Date(b.createdAt).toLocaleDateString()}</p>
             </button>
           ))}
         </div>
       </aside>
 
-      {/* Main Content Area */}
+      {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Header Section */}
+        {/* Header - 🔥 Passing full details for metrics populating */}
         <div className="z-20 border-b border-white/5 p-6 bg-[#09090b]/50 backdrop-blur-xl">
           <DashboardHeader 
-            selectedBuild={selectedBuild} 
+            selectedBuild={buildDetails || selectedBuild} 
             masterCases={masterCases} 
             filterStatus={filterStatus} 
             setFilterStatus={setFilterStatus} 
             specSearch={specSearch} 
-            setSpecSearch={setSpecSearch} 
+            setSpecSearch={setSpecSearch}
+            projectSearch={projectSearch}
+            setProjectSearch={setProjectSearch}
           />
         </div>
 
-        {/* Scrollable Results Area */}
         <div className="flex-1 overflow-y-auto p-8 space-y-12 custom-scrollbar">
           {loadingDetails ? (
             <div className="h-64 flex flex-col items-center justify-center gap-4">
@@ -227,7 +233,7 @@ export default function AutomationDashboard() {
             </div>
           ) : (
             <>
-              {/* Metrics Summary Grid */}
+              {/* Metrics Grid */}
               {buildMetrics && (
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                   <MetricCard title="Coverage" value={`${buildMetrics.percent}%`} sub={`${buildMetrics.automated} Automated`} icon={<Target className="text-indigo-500" />} />
@@ -237,7 +243,7 @@ export default function AutomationDashboard() {
                 </div>
               )}
 
-              {/* In-Page Spec Navigation */}
+              {/* Jump to Spec Navigation */}
               <div className="flex flex-wrap gap-2 p-4 bg-white/5 rounded-3xl border border-white/5">
                 <div className="flex items-center gap-2 mr-4 text-zinc-600">
                   <ListFilter className="w-3 h-3" />
@@ -254,7 +260,7 @@ export default function AutomationDashboard() {
                 ))}
               </div>
 
-              {/* Grouped Spec & Test View */}
+              {/* Specs & Tests Grid */}
               <div className="space-y-24 pb-20">
                 {Object.entries(specGroups).map(([name, group]: [string, any]) => (
                   <div key={name} id={name} className="space-y-8 scroll-mt-40">
@@ -273,7 +279,6 @@ export default function AutomationDashboard() {
                             key={uiId} 
                             test={test} 
                             isExpanded={expandedTests.includes(uiId)} 
-                            // Passing the Spec ID and Test Title to find the specific logs in the JSON column
                             onToggle={() => toggleTest(uiId, group.id, test.title)} 
                           />
                         );
