@@ -1,12 +1,10 @@
-import 'dotenv/config';
 import { defineConfig } from 'drizzle-kit';
 
 export default defineConfig({
   schema: './db/schema.ts',
   out: './drizzle',
-  dialect: 'mysql', 
+  dialect: 'mysql',
   dbCredentials: {
-    url: process.env.DATABASE_URL!,
+    url: process.env.DATABASE_URL!, // No 'ssl' key here!
   },
-  schemaFilter: ["public"], // Critical for Supabase
 });

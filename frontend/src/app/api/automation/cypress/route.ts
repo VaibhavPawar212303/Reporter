@@ -8,7 +8,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { build_id, spec_file, test_entry, video_url, is_video_update } = body;
 
-    // 1. Verify the Build exists
+    // 1. Verify the Build exists (Using Relational Query API)
     const buildExists = await db.query.automationBuilds.findFirst({
       where: eq(automationBuilds.id, build_id),
     });
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     }
 
     return await db.transaction(async (tx) => {
-      // 2. Find the existing spec row for this build
+      // 2. Find the existing spec row
       const existingRecord = await tx.query.testResults.findFirst({
         where: and(
           eq(testResults.buildId, build_id),
@@ -26,14 +26,14 @@ export async function POST(req: Request) {
         ),
       });
 
-      // --- SCENARIO A: VIDEO UPDATE (From after:spec) ---
+      // --- SCENARIO A: VIDEO UPDATE ---
       if (is_video_update) {
         if (!existingRecord) return NextResponse.json({ error: "Spec not found" }, { status: 404 });
 
         const testsArray = (existingRecord.tests as any[]) || [];
         const updatedWithVideo = testsArray.map((t: any) => ({
           ...t,
-          video_url: video_url // Apply the single Cypress video to all tests in this spec
+          video_url: video_url 
         }));
 
         await tx.update(testResults)
@@ -43,27 +43,26 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: true, message: "Spec video synced" });
       }
 
-      // --- SCENARIO B: STANDARD TEST RESULT (From afterEach) ---
+      // --- SCENARIO B: STANDARD TEST RESULT ---
       let updatedTests = (existingRecord?.tests as any[]) || [];
       const testIndex = updatedTests.findIndex((t: any) => t.title === test_entry.title);
 
       if (testIndex !== -1) {
-        // Update existing test object
         updatedTests[testIndex] = {
           ...updatedTests[testIndex],
           ...test_entry,
-          // Preserve video_url if it was already set by a previous run or partial update
           video_url: test_entry.video_url || updatedTests[testIndex].video_url || null,
         };
       } else {
-        // Add new test object
         updatedTests.push({
           ...test_entry,
           project: 'Cypress'
         });
       }
 
-      // 3. Atomic Upsert back to the database
+      // 3. ATOMIC UPSERT (MySQL / TiDB Dialect)
+      // .onConflictDoUpdate is for Postgres. 
+      // .onDuplicateKeyUpdate is for TiDB/MySQL.
       await tx.insert(testResults)
         .values({
           buildId: build_id,
@@ -71,8 +70,7 @@ export async function POST(req: Request) {
           tests: updatedTests,
           executedAt: new Date(),
         })
-        .onConflictDoUpdate({
-          target: [testResults.buildId, testResults.specFile],
+        .onDuplicateKeyUpdate({
           set: { tests: updatedTests },
         });
 
