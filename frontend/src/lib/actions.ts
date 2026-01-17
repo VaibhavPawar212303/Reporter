@@ -1,17 +1,14 @@
 "use server"
 
 import { desc, eq } from 'drizzle-orm';
-import { automationBuilds, testCases } from '../../db/schema';
+import { automationBuilds, testCases, testResults } from '../../db/schema';
 import { revalidatePath } from "next/cache";
 import { db } from '../../db';
-import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
-// 1. Get Build History for Sidebar (Optimized: Removed "with results" to save local memory/bandwidth)
+/**
+ * 1. Get Build History for Sidebar
+ * TiDB Optimized: Selecting specific fields saves Request Units (RUs)
+ */
 export async function getBuildHistory() {
   try {
     return await db.select({
@@ -30,7 +27,10 @@ export async function getBuildHistory() {
   }
 }
 
-// 2. Bulk Upload Test Cases (Unchanged)
+/**
+ * 2. Bulk Upload Test Cases 
+ * ✅ FIXED: Changed .onConflictDoUpdate (Postgres) to .onDuplicateKeyUpdate (TiDB/MySQL)
+ */
 export async function uploadMasterTestCases(data: any[]) {
   try {
     for (const item of data) {
@@ -56,8 +56,7 @@ export async function uploadMasterTestCases(data: any[]) {
           loggedUser: String(item["Logged User"] || `${item.FirstName || ''} ${item.LastName || ''}`.trim()),
           tags: String(item["Tags"] || ''),
         })
-        .onConflictDoUpdate({
-          target: [testCases.caseCode],
+        .onDuplicateKeyUpdate({
           set: {
             title: String(title),
             moduleName: String(item["ModuleName"] || item["Module Name"] || ''),
@@ -72,12 +71,14 @@ export async function uploadMasterTestCases(data: any[]) {
     revalidatePath('/');
     return { success: true };
   } catch (e: any) {
-    console.error("❌ DB Insert Error:", e);
+    console.error("❌ TiDB Insert Error:", e);
     return { error: e.message };
   }
 }
 
-// 3. Fetch Master List (Unchanged)
+/**
+ * 3. Fetch Master List
+ */
 export async function getMasterTestCases() {
   try {
     return await db.query.testCases.findMany({
@@ -88,7 +89,9 @@ export async function getMasterTestCases() {
   }
 }
 
-// 4. Update Single Test Case (Unchanged)
+/**
+ * 4. Update Single Test Case
+ */
 export async function updateTestCase(id: number, data: any) {
   try {
     const { id: _, createdAt, updatedAt, ...updateData } = data;
@@ -108,7 +111,10 @@ export async function updateTestCase(id: number, data: any) {
   }
 }
 
-// 5. Dashboard Stats (Unchanged)
+/**
+ * 5. Dashboard Stats
+ * Relational query works with TiDB if schema is passed to drizzle()
+ */
 export async function getDashboardStats() {
   try {
     const allBuilds = await db.query.automationBuilds.findMany({
@@ -127,47 +133,30 @@ export async function getDashboardStats() {
   }
 }
 
-// 6. Get Build Details (Modified: Removed "steps" and "stack_trace" to prevent Quota Violation)
+/**
+ * 6. Get Build Details
+ * ✅ CONVERTED: From Supabase to TiDB/Drizzle
+ * In TiDB, we query 'testResults' based on the 'buildId'
+ */
 export async function getBuildDetails(buildId: number) {
   try {
-    const { data, error } = await supabase
-      .from('builds')
-      .select(`
-        id,
-        status,
-        environment,
-        createdAt,
-        spec_results (
-          id,
-          specFile:spec_file,
-          videoUrl:video_url,
-          test_results (
-            id,
-            title,
-            full_title,
-            status,
-            duration,
-            error,
-            case_codes,
-            screenshot_url,
-            browser,
-            os,
-            current_retry
-          )
-        )
-      `)
-      .eq('id', buildId)
-      .single();
+    const data = await db.query.automationBuilds.findFirst({
+      where: eq(automationBuilds.id, buildId),
+      with: {
+        results: true // This fetches all rows from 'test_results' for this build
+      }
+    });
 
-    if (error) throw error;
+    if (!data) return null;
 
     return {
       ...data,
-      results: data.spec_results.map((spec: any) => ({
+      // Mapping to match your frontend expected structure
+      results: data.results.map((spec) => ({
         id: spec.id,
         specFile: spec.specFile,
-        videoUrl: spec.videoUrl,
-        tests: spec.test_results || []
+        // In TiDB we stored tests as a JSON array in the 'tests' column
+        tests: spec.tests || [] 
       }))
     };
   } catch (error) {
@@ -176,19 +165,28 @@ export async function getBuildDetails(buildId: number) {
   }
 }
 
-// 🔥 REQUIRED ADDITION: 7. Get Test Steps (Fetch heavy data only when needed)
-export async function getTestSteps(testId: string) {
+/**
+ * 7. Get Test Steps 
+ * ✅ CONVERTED: From Supabase to TiDB/Drizzle
+ * Since steps are stored inside the JSON column 'tests' in 'test_results'
+ */
+export async function getTestSteps(specId: number, testTitle: string) {
   try {
-    const { data, error } = await supabase
-      .from('test_results')
-      .select('steps, stack_trace')
-      .eq('id', testId)
-      .single();
+    const record = await db.query.testResults.findFirst({
+      where: eq(testResults.id, specId)
+    });
 
-    if (error) throw error;
-    return data;
+    if (!record || !Array.isArray(record.tests)) return null;
+
+    // Find the specific test inside the JSON array
+    const specificTest = record.tests.find((t: any) => t.title === testTitle);
+    
+    return {
+      steps: specificTest?.steps || [],
+      stack_trace: specificTest?.error?.stack || null
+    };
   } catch (error) {
-    console.error(`❌ Error fetching steps for test ${testId}:`, error);
+    console.error(`❌ Error fetching steps for spec ${specId}:`, error);
     return null;
   }
 }
