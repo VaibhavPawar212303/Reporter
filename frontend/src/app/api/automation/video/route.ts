@@ -1,17 +1,7 @@
-import axios from 'axios';
-import https from 'https';
 import { NextRequest } from 'next/server';
 
 export const dynamic = 'force-dynamic';
-// Vercel/Next.js max execution time
-export const maxDuration = 60; 
-
-// Optimized agent to prevent socket exhaustion
-const agent = new https.Agent({ 
-    keepAlive: true, 
-    maxSockets: 100, // Handle more simultaneous requests
-    family: 4 
-});
+export const maxDuration = 60; // Max for Vercel Hobby
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -23,39 +13,52 @@ export async function GET(req: NextRequest) {
   try {
     const auth = Buffer.from(`:${apiKey}`).toString('base64');
     
-    const response = await axios({
-      method: 'get',
-      url: `https://pixeldrain.com/api/file/${fileId}`,
-      headers: { 'Authorization': `Basic ${auth}` },
-      responseType: 'stream',
-      httpsAgent: agent,
-      // Increase timeout to 2 minutes for large videos
-      timeout: 120000, 
+    // 1. Capture the Range header from the user's browser
+    const rangeHeader = req.headers.get('range');
+
+    const headers: HeadersInit = {
+      'Authorization': `Basic ${auth}`,
+    };
+    
+    // 2. Forward the range request to Pixeldrain if it exists
+    if (rangeHeader) {
+      headers['Range'] = rangeHeader;
+    }
+
+    const response = await fetch(`https://pixeldrain.com/api/file/${fileId}`, {
+      method: 'GET',
+      headers: headers,
     });
 
-    // Extract useful headers from Pixeldrain
-    const contentType = response.headers['content-type'] || 'video/webm';
-    const contentLength = response.headers['content-length'];
+    if (!response.ok && response.status !== 206) {
+      return new Response(`Pixeldrain error: ${response.statusText}`, { status: response.status });
+    }
 
-    // Convert Node stream to Web stream for Next.js Response
-    const stream = new ReadableStream({
-      start(controller) {
-        response.data.on('data', (chunk: any) => controller.enqueue(chunk));
-        response.data.on('end', () => controller.close());
-        response.data.on('error', (err: any) => controller.error(err));
-      },
-      cancel() {
-        response.data.destroy(); // Clean up if user closes browser
-      }
+    // 3. Forward the necessary headers back to the browser
+    const responseHeaders = new Headers();
+    const headersToForward = [
+      'content-type',
+      'content-length',
+      'content-range', // Required for seeking
+      'accept-ranges',
+      'cache-control'
+    ];
+
+    headersToForward.forEach(header => {
+      const value = response.headers.get(header);
+      if (value) responseHeaders.set(header, value);
     });
 
-    return new Response(stream, {
-      headers: {
-        'Content-Type': contentType,
-        'Accept-Ranges': 'bytes',
-        'Content-Length': contentLength || '',
-        'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
-      },
+    // Default Cache Control if not provided
+    if (!responseHeaders.has('cache-control')) {
+      responseHeaders.set('Cache-Control', 'public, max-age=3600');
+    }
+
+    // 4. Return the Web Stream directly
+    // Status 206 means "Partial Content" (used for video seeking)
+    return new Response(response.body, {
+      status: response.status,
+      headers: responseHeaders,
     });
 
   } catch (error: any) {

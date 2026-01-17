@@ -3,7 +3,6 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '../../../../../../db';
 import { testResults } from '../../../../../../db/schema';
 
-
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -13,8 +12,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
+    // TiDB Serverless supports transactions via the Drizzle driver
     return await db.transaction(async (tx) => {
-      // 1. Find the specific spec row for this build
+      
+      // 1. Find the specific spec row
+      // Ensure 'testResults' is included in your drizzle(client, { schema }) init
       const existingRecord = await tx.query.testResults.findFirst({
         where: and(
           eq(testResults.buildId, Number(build_id)),
@@ -23,24 +25,30 @@ export async function POST(req: Request) {
       });
 
       if (!existingRecord) {
-        console.error(`⚠️ Spec not found for video update: ${spec_file}`);
         return NextResponse.json({ error: "Spec record not found" }, { status: 404 });
       }
 
-      // 2. Map the existing tests array and inject the video URL into every test
-      const testsArray = (existingRecord.tests as any[]) || [];
+      // 2. Handle JSON data safely
+      // In MySQL/TiDB, JSON columns are returned as objects/arrays already
+      const testsArray = Array.isArray(existingRecord.tests) 
+        ? existingRecord.tests 
+        : [];
+
       const updatedTests = testsArray.map((test: any) => ({
         ...test,
-        video_url: video_url, // Apply the spec-level video to all individual tests
+        video_url: video_url, 
       }));
 
       // 3. Update the database
+      // No .returning() here (MySQL doesn't support it)
       await tx.update(testResults)
         .set({ tests: updatedTests })
         .where(eq(testResults.id, existingRecord.id));
 
-      console.log(`✅ Cypress Video mapped to ${updatedTests.length} tests in ${spec_file}`);
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ 
+        success: true, 
+        updatedTestsCount: updatedTests.length 
+      });
     });
 
   } catch (error: any) {
