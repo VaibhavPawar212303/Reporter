@@ -1,24 +1,30 @@
+// src/app/api/automation/result/route.ts
 import { NextResponse } from 'next/server';
 import { eq, and } from 'drizzle-orm';
-import { automationBuilds, testResults } from '../../../../../db/schema';
 import { db } from '../../../../../db';
+import { automationBuilds, testResults } from '../../../../../db/schema';
+
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { build_id, spec_file, test_entry, video_url, is_video_update } = body;
+    const { build_id, spec_file, test_entry } = body;
 
-    // 1. Verify the Build exists (Using Relational Query API)
-    const buildExists = await db.query.automationBuilds.findFirst({
+    if (!build_id || !spec_file || !test_entry) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+
+    // 1. Verify Build exists
+    const build = await db.query.automationBuilds.findFirst({
       where: eq(automationBuilds.id, build_id),
     });
 
-    if (!buildExists) {
-      return NextResponse.json({ error: `Build ID ${build_id} not found.` }, { status: 400 });
+    if (!build) {
+      return NextResponse.json({ error: "Build not found" }, { status: 404 });
     }
 
     return await db.transaction(async (tx) => {
-      // 2. Find the existing spec row
+      // 2. Find existing spec record for this build
       const existingRecord = await tx.query.testResults.findFirst({
         where: and(
           eq(testResults.buildId, build_id),
@@ -26,59 +32,42 @@ export async function POST(req: Request) {
         ),
       });
 
-      // --- SCENARIO A: VIDEO UPDATE ---
-      if (is_video_update) {
-        if (!existingRecord) return NextResponse.json({ error: "Spec not found" }, { status: 404 });
+      let updatedTests = existingRecord ? (existingRecord.tests as any[]) : [];
 
-        const testsArray = (existingRecord.tests as any[]) || [];
-        const updatedWithVideo = testsArray.map((t: any) => ({
-          ...t,
-          video_url: video_url 
-        }));
-
-        await tx.update(testResults)
-          .set({ tests: updatedWithVideo })
-          .where(eq(testResults.id, existingRecord.id));
-
-        return NextResponse.json({ success: true, message: "Spec video synced" });
-      }
-
-      // --- SCENARIO B: STANDARD TEST RESULT ---
-      let updatedTests = (existingRecord?.tests as any[]) || [];
-      const testIndex = updatedTests.findIndex((t: any) => t.title === test_entry.title);
+      // 3. Find if this specific test (Title + Project + Run) exists in the JSON array
+      const testIndex = updatedTests.findIndex((t: any) =>
+        t.title === test_entry.title &&
+        t.project === test_entry.project &&
+        t.run_number === test_entry.run_number
+      );
 
       if (testIndex !== -1) {
+        // Update existing test entry (merging logs and status)
         updatedTests[testIndex] = {
           ...updatedTests[testIndex],
           ...test_entry,
-          video_url: test_entry.video_url || updatedTests[testIndex].video_url || null,
+          logs: [...(updatedTests[testIndex].logs || []), ...(test_entry.logs || [])]
         };
       } else {
-        updatedTests.push({
-          ...test_entry,
-          project: 'Cypress'
-        });
+        // Add new test entry
+        updatedTests.push(test_entry);
       }
 
-      // 3. ATOMIC UPSERT (MySQL / TiDB Dialect)
-      // .onConflictDoUpdate is for Postgres. 
-      // .onDuplicateKeyUpdate is for TiDB/MySQL.
-      await tx.insert(testResults)
-        .values({
-          buildId: build_id,
-          specFile: spec_file,
-          tests: updatedTests,
-          executedAt: new Date(),
-        })
+      // 4. TiDB Atomic Upsert
+      await tx.insert(testResults).values({
+        buildId: build_id,   // Use buildId (camelCase)
+        specFile: spec_file, // Use specFile (camelCase)
+        tests: updatedTests,
+        executedAt: new Date(),
+      })
         .onDuplicateKeyUpdate({
           set: { tests: updatedTests },
         });
 
       return NextResponse.json({ success: true });
     });
-
   } catch (error: any) {
-    console.error("❌ CYPRESS API ERROR:", error.message);
+    console.error("❌ PLAYWRIGHT API ERROR:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
