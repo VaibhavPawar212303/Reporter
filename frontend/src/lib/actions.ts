@@ -175,7 +175,8 @@ export async function getTestSteps(specId: number, testTitle: string) {
       stdout_logs: test.stdout_logs || test.logs || [],
       stderr_logs: test.stderr_logs || [],
       error: test.error || null,
-      video_url: test.video_url || null
+      video_url: test.video_url || null,
+      stack_trace:test.stack_trace
     };
   } catch (error) {
     console.error('Error fetching test steps:', error);
