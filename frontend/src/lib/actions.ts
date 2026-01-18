@@ -5,32 +5,7 @@ import { automationBuilds, testCases, testResults } from '../../db/schema';
 import { revalidatePath } from "next/cache";
 import { db } from '../../db';
 
-/**
- * 1. Get Build History for Sidebar
- * TiDB Optimized: Selecting specific fields saves Request Units (RUs)
- */
-export async function getBuildHistory() {
-  try {
-    return await db.select({
-      id: automationBuilds.id,
-      status: automationBuilds.status,
-      environment: automationBuilds.environment,
-      createdAt: automationBuilds.createdAt,
-      type: automationBuilds.type
-    })
-      .from(automationBuilds)
-      .orderBy(desc(automationBuilds.id))
-      .limit(30);
-  } catch (error) {
-    console.error("Database Fetch Error:", error);
-    return [];
-  }
-}
 
-/**
- * 2. Bulk Upload Test Cases 
- * ✅ FIXED: Changed .onConflictDoUpdate (Postgres) to .onDuplicateKeyUpdate (TiDB/MySQL)
- */
 export async function uploadMasterTestCases(data: any[]) {
   try {
     for (const item of data) {
@@ -76,22 +51,6 @@ export async function uploadMasterTestCases(data: any[]) {
   }
 }
 
-/**
- * 3. Fetch Master List
- */
-export async function getMasterTestCases() {
-  try {
-    return await db.query.testCases.findMany({
-      orderBy: [desc(testCases.updatedAt)]
-    });
-  } catch (error) {
-    return [];
-  }
-}
-
-/**
- * 4. Update Single Test Case
- */
 export async function updateTestCase(id: number, data: any) {
   try {
     const { id: _, createdAt, updatedAt, ...updateData } = data;
@@ -131,111 +90,99 @@ export async function getDashboardStats() {
   }
 }
 
-export async function getBuildDetails(buildId: number) {
-  try {
-    // Query 1: Get the build metadata
-    const build = await db.query.automationBuilds.findFirst({
-      where: eq(automationBuilds.id, buildId),
-    });
-
-    if (!build) return null;
-
-    // Query 2: Get the spec results associated with this build
-    const results = await db.query.testResults.findMany({
-      where: eq(testResults.buildId, buildId),
-    });
-
-    // Manually combine them to match the expected frontend structure
-    return {
-      ...build,
-      results: results.map((spec) => ({
-        id: spec.id,
-        specFile: spec.specFile,
-        tests: spec.tests || []
-      }))
-    };
-  } catch (error: any) {
-    console.error(`❌ Error fetching details for build ${buildId}:`, error.message);
-    return null;
-  }
+export async function getBuildHistory() {
+  return await db.select({
+    id: automationBuilds.id,
+    status: automationBuilds.status,
+    environment: automationBuilds.environment,
+    createdAt: automationBuilds.createdAt,
+    type: automationBuilds.type
+  }).from(automationBuilds).orderBy(desc(automationBuilds.id)).limit(30);
 }
 
-export async function getTestSteps(specId: number, testTitle: string) {
-  try {
-    const record = await db.query.testResults.findFirst({
-      where: eq(testResults.id, specId)
-    });
-
-    if (!record || !Array.isArray(record.tests)) return null;
-
-    const specificTest = record.tests.find((t: any) => t.title === testTitle);
-
-    return {
-      steps: specificTest?.steps || [],
-      stack_trace: specificTest?.error?.stack || null
-    };
-  } catch (error) {
-    console.error(`❌ Error fetching steps for spec ${specId}:`, error);
-    return null;
-  }
-}
-
+// 2. Trend Data: Aggregates last 10 builds (Fixed for TiDB)
 export async function getPlaywrightTrend() {
   try {
-    // 1. Fetch the last 10 Playwright builds first (Lightweight)
-    const builds = await db
-      .select({
-        id: automationBuilds.id,
-        createdAt: automationBuilds.createdAt,
-      })
+    const builds = await db.select({ id: automationBuilds.id })
       .from(automationBuilds)
       .where(eq(automationBuilds.type, 'playwright'))
       .orderBy(desc(automationBuilds.id))
       .limit(10);
 
     if (builds.length === 0) return [];
+    const buildIds = builds.map(b => b.id);
 
-    const buildIds = builds.map((b) => b.id);
+    const results = await db.select().from(testResults).where(inArray(testResults.buildId, buildIds));
 
-    // 2. Fetch all test results for these 10 builds in one query
-    const results = await db
-      .select()
-      .from(testResults)
-      .where(inArray(testResults.buildId, buildIds));
-
-    // 3. Aggregate data in JavaScript (No Lateral Join needed)
-    const trendData = builds.map((b) => {
-      let passed = 0;
-      let total = 0;
-
-      // Find all spec results belonging to this build
-      const buildSpecs = results.filter((r) => r.buildId === b.id);
-
-      buildSpecs.forEach((spec) => {
-        // spec.tests is the JSON array from TiDB
-        if (Array.isArray(spec.tests)) {
-          spec.tests.forEach((t: any) => {
-            total++;
-            // Support both Playwright/Cypress status strings
-            const status = t.status?.toLowerCase();
-            if (status === 'passed' || status === 'expected' || status === 'success') {
-              passed++;
-            }
-          });
-        }
+    return builds.map(b => {
+      let passed = 0, total = 0;
+      const buildSpecs = results.filter(r => r.buildId === b.id);
+      buildSpecs.forEach(spec => {
+        (spec.tests as any[])?.forEach(t => {
+          total++;
+          if (['passed', 'expected', 'success'].includes(t.status?.toLowerCase())) passed++;
+        });
       });
+      return { name: `#${b.id}`, passed, total };
+    }).reverse();
+  } catch (e) { return []; }
+}
 
-      return {
-        name: `#${b.id}`,
-        passed,
-        total,
-      };
+// 3. Build Details: Split query to avoid Lateral Join Error
+export async function getBuildDetails(buildId: number) {
+  try {
+    const build = await db.query.automationBuilds.findFirst({ where: eq(automationBuilds.id, buildId) });
+    if (!build) return null;
+
+    const results = await db.select().from(testResults).where(eq(testResults.buildId, buildId));
+    
+    return {
+      ...build,
+      results: results.map(r => ({
+        ...r,
+        tests: (r.tests as any[]).map(t => ({
+          ...t,
+          has_details: !!(t.steps?.length || t.logs?.length || t.error)
+        }))
+      }))
+    };
+  } catch (e) { return null; }
+}
+
+// 4. Test Steps: Lazy fetch heavy logs on click
+export async function getTestSteps(specId: number, testTitle: string) {
+  try {
+    // Query the testResults table with the specId
+    const testResult = await db.query.testResults.findFirst({ 
+      where: eq(testResults.id, specId) 
     });
-
-    // Reverse so the chart flows from Oldest to Newest (Left to Right)
-    return trendData.reverse();
-  } catch (error: any) {
-    console.error("❌ Trend Fetch Error:", error.message);
-    return [];
+    
+    if (!testResult) return null;
+    
+    // Parse the tests if it's stored as JSON string
+    const testsArray = typeof testResult.tests === 'string' 
+      ? JSON.parse(testResult.tests) 
+      : testResult.tests;
+    
+    // Find the test by title in the tests array
+    const test = (testsArray as any[]).find((t: any) => t.title === testTitle);
+    
+    if (!test) return null;
+    
+    return {
+      steps: test.steps || [],
+      logs: test.logs || [],
+      stdout_logs: test.stdout_logs || test.logs || [],
+      stderr_logs: test.stderr_logs || [],
+      error: test.error || null,
+      video_url: test.video_url || null
+    };
+  } catch (error) {
+    console.error('Error fetching test steps:', error);
+    return null;
   }
+}
+
+export async function getMasterTestCases() {
+  return await db.query.testCases.findMany({ orderBy: [desc(testCases.updatedAt)] });
 }
