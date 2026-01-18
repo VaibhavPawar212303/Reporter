@@ -24,40 +24,92 @@ import { ProjectLevelStats } from "./_components/ProjectLevelStats";
 import { TestRow } from "./_components/TestRow";
 import { cn } from "@/lib/utils";
 
-/* -------------------- TiDB NORMALIZER -------------------- */
+/* -------------------- 🔥 FIXED STATUS NORMALIZER -------------------- */
+function normalizeStatus(status: string): 'passed' | 'failed' | 'running' | 'skipped' {
+  if (!status) return 'running';
+  const s = status.toLowerCase().trim();
+  if (s === 'passed') return 'passed';
+  if (s === 'failed') return 'failed';
+  if (s === 'skipped') return 'skipped';
+  return 'running';
+}
+
+/* -------------------- 🔥 FIXED TiDB NORMALIZER -------------------- */
 function normalizePlaywrightResults(specResults: any[]) {
-  // 🔥 Simple approach: just flatten all tests, group by (project, title)
   const testMap = new Map<string, any>();
   
   specResults?.forEach((spec: any) => {
     spec.tests?.forEach((test: any) => {
-      // Key is project + title only
-      const key = `${test.project}-${test.title}`;
+      // 🔥 Use unique_key if available, otherwise create from project::title
+      const key = test.unique_key || `${test.project || 'default'}::${test.title || 'unknown'}`;
       
-      // Keep the test with the highest run_number (latest attempt)
-      if (!testMap.has(key)) {
-        testMap.set(key, test);
+      const existing = testMap.get(key);
+      
+      if (!existing) {
+        // First time seeing this test
+        testMap.set(key, {
+          ...test,
+          unique_key: key,
+          normalizedStatus: normalizeStatus(test.status)
+        });
       } else {
-        const existing = testMap.get(key)!;
-        // If this test has a higher run number, replace it
-        if (test.run_number > existing.run_number) {
-          testMap.set(key, test);
+        // 🔥 PRIORITY LOGIC:
+        // 1. is_final=true ALWAYS wins over is_final=false
+        // 2. If both have same is_final, use higher run_number
+        // 3. Never let "running" status overwrite a final result
+        
+        const existingIsFinal = existing.is_final === true;
+        const newIsFinal = test.is_final === true;
+        
+        let shouldReplace = false;
+        
+        if (newIsFinal && !existingIsFinal) {
+          // New is final, existing is not -> replace
+          shouldReplace = true;
+        } else if (newIsFinal && existingIsFinal) {
+          // Both final -> use higher run_number (later attempt)
+          shouldReplace = (test.run_number || 0) > (existing.run_number || 0);
+        } else if (!newIsFinal && !existingIsFinal) {
+          // Neither final -> use higher run_number for progress
+          shouldReplace = (test.run_number || 0) > (existing.run_number || 0);
+        }
+        // If existing is final and new is not -> never replace
+        
+        if (shouldReplace) {
+          testMap.set(key, {
+            ...test,
+            unique_key: key,
+            normalizedStatus: normalizeStatus(test.status)
+          });
         }
       }
     });
   });
 
-  // 🔥 Convert map to array and ensure all fields are present
-  return Array.from(testMap.values()).map(test => ({
+  // 🔥 Convert map to array with all required fields
+  const result = Array.from(testMap.values()).map(test => ({
     ...test,
-    // Ensure required fields exist
-    id: test.id,
-    project: test.project,
-    title: test.title,
-    status: test.status,
+    id: test.id || 0,
+    project: test.project || 'default',
+    title: test.title || 'unknown',
+    status: normalizeStatus(test.status), // 🔥 Normalized to lowercase
     specId: test.specId || 0,
-    specFile: test.specFile || test.file || 'unknown'
+    specFile: test.specFile || test.file || 'unknown',
+    unique_key: test.unique_key
   }));
+
+  // 🔥 Debug logging
+  console.log('🔍 NORMALIZER DEBUG:');
+  console.log('   Input specs:', specResults?.length || 0);
+  console.log('   Total tests in specs:', specResults?.reduce((sum: number, s: any) => sum + (s.tests?.length || 0), 0) || 0);
+  console.log('   Unique tests after dedup:', result.length);
+  console.log('   By status:', {
+    passed: result.filter(t => t.status === 'passed').length,
+    failed: result.filter(t => t.status === 'failed').length,
+    running: result.filter(t => t.status === 'running').length
+  });
+
+  return result;
 }
 
 export default function PlaywrightDashboard() {
@@ -190,27 +242,28 @@ export default function PlaywrightDashboard() {
     }
   };
 
+  // 🔥 FIXED: Use the improved normalizer
   const normalizedTests = useMemo(() => {
     const results = normalizePlaywrightResults(buildDetails?.results || []);
-    console.log('🔍 DEBUG - Spec Results Count:', buildDetails?.results?.length);
-    console.log('🔍 DEBUG - Tests per Spec:', buildDetails?.results?.map((r: any) => ({
-      specFile: r.specFile,
-      testCount: r.tests?.length || 0,
-      tests: r.tests?.map((t: any) => `${t.project}-${t.title}`)
-    })));
-    console.log('🔍 DEBUG - Normalized Tests Count:', results.length);
-    console.log('🔍 DEBUG - Normalized Tests:', results.map((t: any) => `${t.project}-${t.title}`));
     return results;
   }, [buildDetails]);
 
+  // 🔥 FIXED: Stats calculation with normalized status
   const currentStats = useMemo(() => {
     const s = { total: 0, passed: 0, failed: 0, running: 0 };
+    
     normalizedTests.forEach((t: any) => {
       s.total++;
-      if (t.status === 'running') s.running++;
-      else if (t.status === 'passed') s.passed++;
-      else s.failed++;
+      // 🔥 Status is already normalized to lowercase by normalizePlaywrightResults
+      const status = t.status || 'running';
+      
+      if (status === 'running') s.running++;
+      else if (status === 'passed') s.passed++;
+      else if (status === 'failed') s.failed++;
+      else s.failed++; // Unknown status counts as failed
     });
+    
+    console.log('📊 STATS:', s);
     return s;
   }, [normalizedTests]);
 
@@ -284,7 +337,31 @@ export default function PlaywrightDashboard() {
               <div className="flex-1 w-full min-h-[200px] relative flex items-center justify-center min-w-0">
                 <div className="absolute flex flex-col items-center justify-center pointer-events-none pb-4"><span className="text-3xl font-black text-white">{currentStats.total}</span><span className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">Tests</span></div>
                 <ResponsiveContainer width="100%" height="100%">
-                  <PieChart><Pie data={[{ name: 'FAIL', value: currentStats.failed, color: '#ef4444' }, { name: 'PASS', value: currentStats.passed, color: '#10b981' }, { name: 'LIVE', value: currentStats.running, color: '#6366f1' }].filter(d => d.value > 0)} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={8} dataKey="value" stroke="none">{[{ color: '#ef4444' }, { color: '#10b981' }, { color: '#6366f1' }].map((e, i) => <Cell key={i} fill={e.color} />)}</Pie><Legend iconType="circle" /></PieChart>
+                  <PieChart>
+                    <Pie 
+                      data={[
+                        { name: 'FAIL', value: currentStats.failed, color: '#ef4444' }, 
+                        { name: 'PASS', value: currentStats.passed, color: '#10b981' }, 
+                        { name: 'LIVE', value: currentStats.running, color: '#6366f1' }
+                      ].filter(d => d.value > 0)} 
+                      cx="50%" 
+                      cy="50%" 
+                      innerRadius={60} 
+                      outerRadius={80} 
+                      paddingAngle={8} 
+                      dataKey="value" 
+                      stroke="none"
+                    >
+                      {[
+                        { name: 'FAIL', value: currentStats.failed, color: '#ef4444' }, 
+                        { name: 'PASS', value: currentStats.passed, color: '#10b981' }, 
+                        { name: 'LIVE', value: currentStats.running, color: '#6366f1' }
+                      ].filter(d => d.value > 0).map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Legend iconType="circle" />
+                  </PieChart>
                 </ResponsiveContainer>
               </div>
             </div>
@@ -306,7 +383,9 @@ export default function PlaywrightDashboard() {
 
         <div className="space-y-16 pb-20">
           {Object.entries(normalizedTests.reduce((acc: any, t: any) => {
-            if ((filterStatus === 'all' || t.status === filterStatus) && t.project.toLowerCase().includes(projectSearch.toLowerCase())) {
+            // 🔥 Filter uses lowercase status (already normalized)
+            if ((filterStatus === 'all' || t.status === filterStatus) && 
+                t.project.toLowerCase().includes(projectSearch.toLowerCase())) {
               if (!acc[t.project]) acc[t.project] = [];
               acc[t.project].push(t);
             }
@@ -314,13 +393,18 @@ export default function PlaywrightDashboard() {
           }, {})).map(([project, tests]: any) => (
             <div key={project} className="bg-[#0c0c0e] border border-white/5 rounded-[2.5rem] overflow-hidden shadow-2xl">
               <div className="px-8 py-6 border-b border-white/5 flex justify-between bg-white/[0.01] items-center">
-                <div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20"><Cpu className="w-6 h-6 text-emerald-500" /></div><span className="text-xl font-black text-white tracking-tight uppercase">{project}</span></div>
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
+                    <Cpu className="w-6 h-6 text-emerald-500" />
+                  </div>
+                  <span className="text-xl font-black text-white tracking-tight uppercase">{project}</span>
+                </div>
                 <ProjectLevelStats tests={tests} />
               </div>
               <div className="divide-y divide-white/5">
                 {tests.map((t: any) => {
-                  // 🔥 Use the actual testResult ID from database, not specId
-                  const uiId = `${t.id}-${t.project}-${t.title}`;
+                  // 🔥 Use unique_key for UI ID
+                  const uiId = t.unique_key || `${t.id}-${t.project}-${t.title}`;
                   return (
                     <div key={uiId} className="relative group">
                       <TestRow
