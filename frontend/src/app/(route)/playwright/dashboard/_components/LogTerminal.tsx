@@ -1,89 +1,97 @@
-// src/app/(route)/playwright/dashboard/_components/LogTerminal.tsx
 'use client';
-
-import React, { useState, useMemo } from "react";
-import { Terminal, Download, Search, Filter, Copy, Check } from "lucide-react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
+import { Terminal, Search, Copy, Check, Loader2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-interface LogTerminalProps {
-  test: any;
-}
+const cleanAnsi = (text: string) => 
+  text?.replace(/[\u001b\x1b]\[[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
 
-export function LogTerminal({ test }: LogTerminalProps) {
+/**
+ * Helper: Normalize logs to string array from multiple sources
+ */
+const normalizeLogs = (logs: any): string[] => {
+  if (!logs) return [];
+  if (typeof logs === 'string') return logs.trim() ? [logs] : [];
+  if (Array.isArray(logs)) return logs.filter(l => l).map(l => String(l || ''));
+  if (typeof logs === 'object' && logs.logs) return normalizeLogs(logs.logs);
+  return [];
+};
+
+export function LogTerminal({ test }: { test: any }) {
   const [filter, setFilter] = useState('');
-  const [showStdout, setShowStdout] = useState(true);
-  const [showStderr, setShowStderr] = useState(true);
   const [copied, setCopied] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const allLogs = useMemo(() => {
-    const logs: any[] = [];
+  // Extract logs from all possible sources
+  const normalizedLogs = useMemo(() => {
+    const logsArray = 
+      normalizeLogs(test?.logs) || 
+      normalizeLogs(test?.stdout_logs) || 
+      normalizeLogs(test?.test_entry?.stdout_logs) ||
+      normalizeLogs(test?.stderr_logs) ||
+      [];
     
-    // Add stdout logs with order preservation
-    if (test.stdout_logs?.length) {
-      test.stdout_logs.forEach((log: string, idx: number) => {
-        logs.push({
-          type: 'stdout',
-          message: log,
-          index: idx,
-          timestamp: null
-        });
-      });
-    }
+    console.log('📊 Detected logs:', logsArray.length, 'lines'); // Debug
     
-    // Add stderr logs
-    if (test.stderr_logs?.length) {
-      test.stderr_logs.forEach((log: string, idx: number) => {
-        logs.push({
-          type: 'stderr',
-          message: log,
-          index: test.stdout_logs?.length + idx || idx,
-          timestamp: null
-        });
-      });
-    }
-
-    return logs;
-  }, [test]);
-
-  const filteredLogs = useMemo(() => {
-    return allLogs.filter(log => {
-      if (!showStdout && log.type === 'stdout') return false;
-      if (!showStderr && log.type === 'stderr') return false;
-      if (filter && !log.message.toLowerCase().includes(filter.toLowerCase())) return false;
-      return true;
+    return logsArray.map((m: string, i: number) => {
+      const cleaned = cleanAnsi(m);
+      return {
+        message: cleaned, 
+        index: i, 
+        isError: cleaned.includes('🔴') || 
+                 cleaned.toLowerCase().includes('error') || 
+                 cleaned.toLowerCase().includes('fail') ||
+                 cleaned.toLowerCase().includes('assert') ||
+                 cleaned.toLowerCase().includes('timeout')
+      };
     });
-  }, [allLogs, filter, showStdout, showStderr]);
+  }, [test?.logs, test?.stdout_logs, test?.test_entry?.stdout_logs, test?.stderr_logs]);
 
-  const copyToClipboard = () => {
-    const text = allLogs.map(log => `[${log.type.toUpperCase()}] ${log.message}`).join('\n');
-    navigator.clipboard.writeText(text);
+  const filteredLogs = useMemo(() => 
+    normalizedLogs.filter((l: any) => 
+      !filter || l.message.toLowerCase().includes(filter.toLowerCase())
+    ), 
+    [normalizedLogs, filter]);
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    if (scrollRef.current && normalizedLogs.length > 0) {
+      setTimeout(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+      }, 100);
+    }
+  }, [normalizedLogs.length]);
+
+  const copyLogs = () => {
+    const logText = normalizedLogs.map(l => l.message).join('\n');
+    navigator.clipboard.writeText(logText);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const downloadLogs = () => {
-    const text = allLogs.map(log => `[${log.type.toUpperCase()}] ${log.message}`).join('\n');
-    const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${test.title.replace(/\s+/g, '_')}_logs.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  // Removed auto-scroll to prevent page jumping when expanding tests
-  // Users can manually scroll within the log terminal
-
-  if (!allLogs.length) {
+  // Loading state for running tests
+  if (!normalizedLogs.length && test?.status === 'running') {
     return (
-      <div className="ml-12 space-y-3">
-        <div className="flex items-center gap-2 text-zinc-500 text-[10px] font-black uppercase tracking-widest px-1">
-          <Terminal className="w-4 h-4" /> Console Output
+      <div className="ml-12 p-12 bg-black/40 border border-white/5 rounded-[2rem] flex flex-col items-center justify-center gap-4">
+        <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+        <div className="text-center">
+          <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Streaming Live Logs</p>
+          <p className="text-[9px] text-zinc-600 mt-1 font-mono">Test in progress...</p>
         </div>
-        <div className="bg-black/40 border border-white/10 rounded-3xl p-8 text-center">
-          <Terminal className="w-8 h-8 text-zinc-700 mx-auto mb-2" />
-          <p className="text-zinc-600 text-xs">No logs available for this test</p>
+      </div>
+    );
+  }
+
+  // Empty state
+  if (!normalizedLogs.length) {
+    return (
+      <div className="ml-12 p-8 bg-black/30 border border-white/5 rounded-[2rem] flex items-center gap-4">
+        <AlertCircle className="w-5 h-5 text-zinc-600" />
+        <div>
+          <p className="text-[10px] font-bold text-zinc-500 uppercase">No console output</p>
+          <p className="text-[9px] text-zinc-700">Test completed without logs</p>
         </div>
       </div>
     );
@@ -91,132 +99,53 @@ export function LogTerminal({ test }: LogTerminalProps) {
 
   return (
     <div className="ml-12 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-zinc-500 text-[10px] font-black uppercase tracking-widest px-1">
-          <Terminal className="w-4 h-4" /> Console Output
-          <span className="text-zinc-700">({filteredLogs.length} lines)</span>
+      <div className="flex items-center justify-between px-2">
+        <div className="flex items-center gap-2 text-zinc-500 text-[10px] font-black uppercase tracking-widest">
+          <Terminal className="w-3.5 h-3.5" /> 
+          Console Output 
+          <span className="text-zinc-800 ml-1 font-mono">({filteredLogs.length}/{normalizedLogs.length})</span>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={copyToClipboard}
-            className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-bold text-zinc-400 transition-all flex items-center gap-1.5"
-          >
-            {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-            {copied ? 'Copied!' : 'Copy'}
-          </button>
-          <button
-            onClick={downloadLogs}
-            className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-bold text-zinc-400 transition-all flex items-center gap-1.5"
-          >
-            <Download className="w-3 h-3" />
-            Download
-          </button>
-        </div>
+        <button 
+          onClick={copyLogs} 
+          className="text-[9px] font-black text-zinc-600 hover:text-indigo-400 transition-colors uppercase tracking-tighter flex items-center gap-1.5"
+        >
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
       </div>
 
-      <div className="bg-black/40 border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
+      <div className="bg-black/60 border border-white/5 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-md">
         {/* Terminal Header */}
-        <div className="bg-[#1e1e1e] px-4 py-3 border-b border-white/5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-red-500/80"></div>
-              <div className="w-3 h-3 rounded-full bg-yellow-500/80"></div>
-              <div className="w-3 h-3 rounded-full bg-green-500/80"></div>
-            </div>
-            <span className="text-[9px] font-mono text-zinc-600 ml-2 uppercase tracking-widest">
-              {test.title.substring(0, 50)}{test.title.length > 50 ? '...' : ''}
-            </span>
+        <div className="bg-[#1a1a1c] px-4 py-2 border-b border-white/5 flex items-center gap-4">
+          <div className="flex gap-1.5 shrink-0">
+            <div className="w-2.5 h-2.5 rounded-full bg-rose-500/40" />
+            <div className="w-2.5 h-2.5 rounded-full bg-amber-500/40" />
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/40" />
           </div>
-          
-          {/* Filter Controls */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowStdout(!showStdout)}
-              className={cn(
-                "px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider transition-all",
-                showStdout 
-                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" 
-                  : "bg-white/5 text-zinc-600 border border-white/5"
-              )}
-            >
-              STDOUT
-            </button>
-            <button
-              onClick={() => setShowStderr(!showStderr)}
-              className={cn(
-                "px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider transition-all",
-                showStderr 
-                  ? "bg-red-500/20 text-red-400 border border-red-500/30" 
-                  : "bg-white/5 text-zinc-600 border border-white/5"
-              )}
-            >
-              STDERR
-            </button>
-          </div>
-        </div>
-
-        {/* Search Bar */}
-        <div className="bg-[#1a1a1a] px-4 py-2 border-b border-white/5">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-600" />
-            <input
-              type="text"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Search logs..."
-              className="w-full pl-9 pr-4 py-1.5 bg-black/40 border border-white/5 rounded-lg text-xs text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-emerald-500/30 focus:ring-1 focus:ring-emerald-500/20"
+          <div className="relative flex-1">
+            <Search className="absolute left-0 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-700" />
+            <input 
+              value={filter} 
+              onChange={e => setFilter(e.target.value)} 
+              placeholder="Filter logs..." 
+              className="bg-transparent text-[11px] text-zinc-400 outline-none w-full font-mono pl-5 placeholder:text-zinc-800" 
             />
           </div>
         </div>
 
-        {/* Log Content */}
-        <div className="max-h-[500px] overflow-y-auto font-mono text-xs bg-black/20 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10 hover:scrollbar-thumb-white/20">
-          <div className="p-4 space-y-1">
-            {filteredLogs.length === 0 ? (
-              <div className="text-zinc-600 text-center py-8">
-                No logs match your filter
-              </div>
-            ) : (
-              filteredLogs.map((log, i) => (
-                <div
-                  key={`${log.type}-${log.index}`}
-                  className={cn(
-                    "py-1 px-3 rounded-lg hover:bg-white/[0.02] transition-colors group",
-                    log.type === 'stderr' && "bg-red-500/[0.03]"
-                  )}
-                >
-                  <div className="flex items-start gap-3">
-                    <span className={cn(
-                      "text-[9px] font-bold tabular-nums shrink-0 mt-0.5",
-                      log.type === 'stdout' ? "text-emerald-600" : "text-red-600"
-                    )}>
-                      {log.type === 'stdout' ? `[${log.index + 1}]` : '[ERR]'}
-                    </span>
-                    <span className={cn(
-                      "break-all leading-relaxed",
-                      log.type === 'stdout' ? "text-emerald-400/90" : "text-red-400/90"
-                    )}>
-                      {log.message}
-                    </span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Stats Footer */}
-        <div className="bg-[#1e1e1e] px-4 py-2 border-t border-white/5 flex items-center justify-between">
-          <div className="flex items-center gap-4 text-[9px] font-mono text-zinc-600">
-            <span>Total: {allLogs.length} lines</span>
-            <span>•</span>
-            <span className="text-emerald-600">STDOUT: {test.stdout_logs?.length || 0}</span>
-            <span>•</span>
-            <span className="text-red-600">STDERR: {test.stderr_logs?.length || 0}</span>
-          </div>
-          <div className="text-[9px] font-mono text-zinc-700">
-            RUNTIME: {test.duration_seconds}s
-          </div>
+        {/* Terminal Output */}
+        <div 
+          ref={scrollRef}
+          className="max-h-[450px] overflow-y-auto p-5 font-mono text-[12px] bg-[#0c0c0e]/90 custom-scrollbar space-y-1.5"
+        >
+          {filteredLogs.map((l: any) => (
+            <div key={l.index} className={cn("flex gap-4 group transition-colors", l.isError ? "text-rose-400/90" : "text-zinc-500 hover:text-zinc-300")}>
+              <span className="shrink-0 opacity-20 group-hover:opacity-100 select-none text-[10px] tabular-nums text-zinc-400">
+                {String(l.index + 1).padStart(3, '0')}
+              </span>
+              <span className="break-all whitespace-pre-wrap leading-relaxed">{l.message}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
