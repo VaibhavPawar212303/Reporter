@@ -1,7 +1,11 @@
 "use client";
 
 import React, { useState } from "react";
-import { Bot, TestTube, FileCode, Bug, Settings, MessageSquare, PenTool, PlayCircle, Book, LayoutDashboard } from "lucide-react";
+import { 
+  Bot, TestTube, FileCode, Bug, Settings, MessageSquare, 
+  PenTool, PlayCircle, Book, LayoutDashboard, Server, 
+  Command, Cpu, Terminal, Database 
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // --- Components ---
@@ -13,49 +17,104 @@ import TestCaseManager from "./(route)/test-cases/page";
 import PlaywrightDashboard from "./(route)/playwright/dashboard/page";
 import Overview from "./_components/Overview";
 
-type ViewState = "overview"|"chat" | "architect" | "testcases" | "cypress" | "playwright" | "test-cases";
+type ViewState = "overview" | "chat" | "architect" | "testcases" | "cypress" | "playwright" | "test-cases";
 
 export default function Home() {
   const [activeView, setActiveView] = useState<ViewState>("test-cases");
 
   return (
-    <div className="flex h-screen bg-[#09090b] text-zinc-300 font-sans text-sm antialiased overflow-hidden">
+    <div className="flex h-screen bg-[#0c0c0e] text-zinc-300 font-sans selection:bg-indigo-500/30 overflow-hidden">
       
-      {/* SIDEBAR NAVIGATION */}
-      <aside className="w-16 lg:w-64 bg-black/40 border-r border-white/5 flex flex-col shrink-0 transition-all duration-300">
-        <div className="h-16 flex items-center px-6 gap-3 border-b border-white/5">
-          <Bot className="w-6 h-6 text-indigo-500" />
-          <h1 className="font-bold text-white tracking-tighter hidden lg:block text-lg">QA Suite</h1>
+      {/* SIDEBAR NAVIGATION - AWS INDUSTRIAL STYLE */}
+      <aside className="w-16 lg:w-64 bg-[#0b0b0d] border-r border-zinc-800 flex flex-col shrink-0 z-50">
+        
+        {/* Branding Area */}
+        <div className="h-16 flex items-center px-6 gap-3 border-b border-zinc-800 bg-zinc-900/20">
+          <div className="w-8 h-8 bg-indigo-600 rounded-sm flex items-center justify-center shadow-[0_0_15px_rgba(79,70,229,0.3)]">
+            <Command className="w-5 h-5 text-white" />
+          </div>
+          <div className="hidden lg:block overflow-hidden">
+            <h1 className="font-bold text-white tracking-tight text-sm uppercase">QA_Console</h1>
+            <p className="text-[8px] font-mono text-zinc-500 uppercase leading-none">v4.0.2-stable</p>
+          </div>
         </div>
 
-        <nav className="p-4 space-y-2 flex-1 overflow-y-auto custom-scrollbar">
-          <div className="text-[10px] uppercase font-black text-zinc-600 tracking-[0.2em] mb-4 hidden lg:block">Automation</div>
-          <NavItem icon={<LayoutDashboard className="w-4 h-4" />}label="Executive Overview"isActive={activeView === "overview"}onClick={() => setActiveView("overview")}/>
-          <NavItem icon={<PlayCircle />} label="Playwright" active={activeView === "playwright"} onClick={() => setActiveView("playwright")} />
-          <NavItem icon={<PlayCircle />} label="Cypress" active={activeView === "cypress"} onClick={() => setActiveView("cypress")} />
-          <NavItem icon={<MessageSquare />} label="AI Chat" active={activeView === "chat"} onClick={() => setActiveView("chat")} />
-          <NavItem icon={<FileCode />} label="AI Architect" active={activeView === "architect"} onClick={() => setActiveView("architect")} />
+        {/* Navigation Items */}
+        <nav className="p-3 space-y-1 flex-1 overflow-y-auto custom-scrollbar">
+          
+          <div className="px-3 py-4">
+             <span className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.25em] font-mono">Infrastructure</span>
+          </div>
 
-          <div className="h-px bg-white/5 my-6" />
+          <NavItem 
+            icon={<LayoutDashboard />} 
+            label="Executive Overview" 
+            active={activeView === "overview"} 
+            onClick={() => setActiveView("overview")} 
+          />
+          <NavItem 
+            icon={<Cpu />} 
+            label="Playwright Instance" 
+            active={activeView === "playwright"} 
+            onClick={() => setActiveView("playwright")} 
+          />
+          <NavItem 
+            icon={<PlayCircle />} 
+            label="Cypress Instance" 
+            active={activeView === "cypress"} 
+            onClick={() => setActiveView("cypress")} 
+          />
+          
+          {/* <div className="px-3 py-4 mt-4 border-t border-zinc-800/50">
+             <span className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.25em] font-mono">Intelligence</span>
+          </div> */}
 
-          <div className="text-[10px] uppercase font-black text-zinc-600 tracking-[0.2em] mb-4 hidden lg:block">Manual</div>
-          <NavItem icon={<Book />} label="Test Cases" active={activeView === "test-cases"} onClick={() => setActiveView("test-cases")} />
-          <NavItem icon={<PenTool />} label="Test Builder" active={activeView === "testcases"} onClick={() => setActiveView("testcases")} />
-          <NavItem icon={<TestTube />} label="Test Runner" />
-          <NavItem icon={<Bug />} label="Self-Healing" />
+          {/* <NavItem 
+            icon={<MessageSquare />} 
+            label="AI Debug Chat" 
+            active={activeView === "chat"} 
+            onClick={() => setActiveView("chat")} 
+          />
+          <NavItem 
+            icon={<FileCode />} 
+            label="Script Architect" 
+            active={activeView === "architect"} 
+            onClick={() => setActiveView("architect")} 
+          /> */}
+
+          <div className="px-3 py-4 mt-4 border-t border-zinc-800/50">
+             <span className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.25em] font-mono">Registry</span>
+          </div>
+
+          <NavItem 
+            icon={<Database />} 
+            label="TestCase Manager" 
+            active={activeView === "test-cases"} 
+            onClick={() => setActiveView("test-cases")} 
+          />
+          {/* <NavItem 
+            icon={<PenTool />} 
+            label="Builder Studio" 
+            active={activeView === "testcases"} 
+            onClick={() => setActiveView("testcases")} 
+          /> */}
         </nav>
 
-        <div className="p-4 border-t border-white/5">
-          <button className="flex items-center gap-3 p-2 text-zinc-500 hover:text-white transition-colors w-full">
-            <Settings className="w-4 h-4" />
-            <span className="hidden lg:block font-bold text-xs uppercase tracking-widest">Settings</span>
-          </button>
+        {/* Footer Area */}
+        <div className="p-3 border-t border-zinc-800 bg-zinc-900/10">
+          {/* <button className="flex items-center gap-3 p-3 text-zinc-500 hover:text-white transition-colors w-full group rounded-sm">
+            <Settings className="w-4 h-4 group-hover:rotate-90 transition-transform duration-500" />
+            <span className="hidden lg:block font-bold text-[10px] uppercase tracking-widest">Global Settings</span>
+          </button> */}
         </div>
       </aside>
 
-      {/* MAIN VIEW AREA */}
-      <main className="flex-1 min-w-0 bg-[#09090b] overflow-y-auto custom-scrollbar">
-        <div className="min-h-full flex flex-col">
+      {/* MAIN VIEW AREA - CONSOLE FRAME */}
+      <main className="flex-1 min-w-0 bg-[#0c0c0e] flex flex-col relative overflow-hidden">
+        {/* Dynamic Background Pattern (Subtle AWS grid) */}
+        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] opacity-[0.03] pointer-events-none" />
+        
+        <div className="flex-1 overflow-y-auto custom-scrollbar relative z-10">
           {activeView === "overview" && <Overview />}
           {activeView === "chat" && <ChatView />}
           {activeView === "architect" && <ArchitectView socket={null} />}
@@ -69,14 +128,40 @@ export default function Home() {
   );
 }
 
+/**
+ * NavItem: AWS Styled sidebar button
+ */
 function NavItem({ icon, label, active, onClick }: any) {
   return (
-    <button onClick={onClick} className={cn(
-      "flex items-center gap-3 px-3 py-3 rounded-xl w-full transition-all group",
-      active ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-lg" : "text-zinc-500 hover:bg-white/5"
-    )}>
-      {React.cloneElement(icon, { className: cn("w-5 h-5", active ? "text-indigo-400" : "text-zinc-500 group-hover:text-zinc-300") })}
-      <span className="hidden lg:block font-bold tracking-tight">{label}</span>
+    <button 
+      onClick={onClick} 
+      className={cn(
+        "flex items-center gap-3 px-3 py-2.5 w-full transition-all duration-200 border-l-2 relative overflow-hidden group rounded-sm",
+        active 
+          ? "bg-zinc-800 border-l-indigo-500 text-white" 
+          : "border-l-transparent text-zinc-500 hover:bg-white/5 hover:text-zinc-300"
+      )}
+    >
+      {/* Icon */}
+      <div className={cn(
+        "transition-colors shrink-0",
+        active ? "text-indigo-400" : "text-zinc-600 group-hover:text-zinc-400"
+      )}>
+        {React.cloneElement(icon, { size: 16 })}
+      </div>
+
+      {/* Label */}
+      <span className={cn(
+        "hidden lg:block text-xs font-bold tracking-tight whitespace-nowrap",
+        active ? "text-white" : "text-inherit"
+      )}>
+        {label}
+      </span>
+
+      {/* Active Indicator Glow */}
+      {active && (
+        <div className="absolute right-0 top-0 bottom-0 w-16 bg-gradient-to-l from-indigo-500/5 to-transparent pointer-events-none" />
+      )}
     </button>
   );
 }
