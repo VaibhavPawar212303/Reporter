@@ -3,7 +3,7 @@
 import React from "react";
 import { 
   CheckCircle2, XCircle, Loader2, ChevronDown, ChevronRight, 
-  Video, ExternalLink, AlertTriangle, Terminal, Cpu, HardDrive, 
+  Video, ExternalLink, Terminal, Cpu, HardDrive, 
   Layers, ListTree, Monitor 
 } from "lucide-react";
 import { LogTerminal } from "./LogTerminal";
@@ -13,6 +13,56 @@ const formatDisplayLabel = (text: any): string => {
   if (!text) return '';
   if (typeof text !== 'string') return String(text);
   return text.replace(/[\u001b\x1b]\[[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '').trim();
+};
+
+// 🔥 Helper function to check if logs exist anywhere in the test object
+const checkHasLogs = (test: any): boolean => {
+  // 1. Direct logs array
+  if (test?.logs && Array.isArray(test.logs) && test.logs.length > 0) return true;
+  if (test?.logs && typeof test.logs === 'string' && test.logs.trim().length > 0) return true;
+  
+  // 2. stdout_logs at top level
+  if (test?.stdout_logs && Array.isArray(test.stdout_logs) && test.stdout_logs.length > 0) return true;
+  
+  // 3. stderr_logs at top level
+  if (test?.stderr_logs && Array.isArray(test.stderr_logs) && test.stderr_logs.length > 0) return true;
+  
+  // 4. test_entry.stdout_logs (from Playwright reporter)
+  if (test?.test_entry?.stdout_logs && Array.isArray(test.test_entry.stdout_logs) && test.test_entry.stdout_logs.length > 0) return true;
+  
+  // 5. test_entry.stderr_logs
+  if (test?.test_entry?.stderr_logs && Array.isArray(test.test_entry.stderr_logs) && test.test_entry.stderr_logs.length > 0) return true;
+  
+  // 6. test_entry.logs
+  if (test?.test_entry?.logs && Array.isArray(test.test_entry.logs) && test.test_entry.logs.length > 0) return true;
+  
+  return false;
+};
+
+// 🔥 Helper function to get video URL from all possible sources
+const getVideoUrl = (test: any): string | null => {
+  return test?.video_url || 
+         test?.attachments?.paths?.video || 
+         test?.test_entry?.attachments?.paths?.video || 
+         null;
+};
+
+// 🔥 Helper function to get screenshot URL from all possible sources
+const getScreenshotUrl = (test: any): string | null => {
+  return test?.screenshot_url ||
+         test?.attachments?.paths?.screenshot || 
+         test?.test_entry?.attachments?.paths?.screenshot || 
+         null;
+};
+
+// 🔥 Helper function to get steps from all possible sources
+const getSteps = (test: any): any[] => {
+  return test?.steps || test?.test_entry?.steps || [];
+};
+
+// 🔥 Helper function to get error from all possible sources
+const getError = (test: any): any => {
+  return test?.error || test?.test_entry?.error || null;
 };
 
 function MetaBox({ icon, label, value }: any) {
@@ -81,18 +131,25 @@ function StepItem({ step, depth }: { step: any; depth: number }) {
   );
 }
 
-export function TestRow({ test, isExpanded, onToggle }: any) {
+export function TestRow({ test, isExpanded, onToggle, isLoadingLogs }: any) {
   const [stepsExpanded, setStepsExpanded] = React.useState(false);
-  const videoUrl = test?.video_url || test?.attachments?.paths?.video;
-  const screenshotUrl = test?.attachments?.paths?.screenshot;
   
-  // FIXED: Check all possible log sources
-  const hasLogs = !!(
-    (test?.logs && Array.isArray(test.logs) && test.logs.length > 0) ||
-    (test?.logs && typeof test.logs === 'string' && test.logs.trim().length > 0) ||
-    (test?.stdout_logs && Array.isArray(test.stdout_logs) && test.stdout_logs.length > 0) ||
-    (test?.test_entry?.stdout_logs && Array.isArray(test.test_entry.stdout_logs) && test.test_entry.stdout_logs.length > 0)
-  );
+  // 🔥 FIXED: Use helper functions to get data from all possible sources
+  const videoUrl = getVideoUrl(test);
+  const screenshotUrl = getScreenshotUrl(test);
+  const steps = getSteps(test);
+  const error = getError(test);
+  const hasLogs = checkHasLogs(test);
+
+  // Get metadata from all possible sources
+  const workerId = test?.worker_id ?? test?.test_entry?.worker_id ?? 0;
+  const project = test?.project || test?.test_entry?.project || 'unknown';
+  const os = test?.os || test?.test_entry?.metadata?.os || 'unknown';
+  const browser = test?.browser || test?.test_entry?.metadata?.browser || test?.project || 'unknown';
+  const duration = test?.duration || test?.duration_ms || test?.test_entry?.duration_ms || 0;
+  const durationDisplay = typeof duration === 'number' 
+    ? (duration > 1000 ? `${(duration / 1000).toFixed(2)}s` : `${duration}ms`)
+    : duration;
 
   return (
     <div className={cn("transition-all border-b border-white/5", isExpanded ? "bg-white/[0.02]" : "hover:bg-white/[0.01]")}>
@@ -103,7 +160,9 @@ export function TestRow({ test, isExpanded, onToggle }: any) {
           
           <div className="flex flex-col">
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-[8px] font-black bg-white/10 text-zinc-500 px-1.5 py-0.5 rounded tracking-widest uppercase">Run {test?.run_number || 1}</span>
+              <span className="text-[8px] font-black bg-white/10 text-zinc-500 px-1.5 py-0.5 rounded tracking-widest uppercase">
+                Run {test?.run_number || 1}
+              </span>
               {test?.status === 'running' && (
                 <span className="flex items-center gap-1 text-[8px] font-black bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-500/20 uppercase tracking-widest animate-pulse">
                    Active Stream
@@ -111,11 +170,16 @@ export function TestRow({ test, isExpanded, onToggle }: any) {
               )}
               {hasLogs && (
                 <span className="flex items-center gap-1 text-[8px] font-black bg-emerald-500/10 text-emerald-500 px-1.5 py-0.5 rounded border border-emerald-500/20 uppercase tracking-widest">
-                  <Terminal size={10} /> Logs Available
+                  <Terminal size={10} /> Logs
+                </span>
+              )}
+              {videoUrl && (
+                <span className="flex items-center gap-1 text-[8px] font-black bg-purple-500/10 text-purple-400 px-1.5 py-0.5 rounded border border-purple-500/20 uppercase tracking-widest">
+                  <Video size={10} /> Video
                 </span>
               )}
               <span className="text-[9px] font-mono text-zinc-600 uppercase ml-1 opacity-50 truncate max-w-[200px]">
-                {test?.specFile}
+                {test?.specFile || test?.spec_file || test?.test_entry?.file?.split(/[\\/]/).pop() || ''}
               </span>
             </div>
             <span className={cn("text-[15px] font-bold tracking-tight", test?.status === 'running' ? "text-indigo-400" : "text-zinc-200")}>
@@ -124,33 +188,35 @@ export function TestRow({ test, isExpanded, onToggle }: any) {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-[10px] font-mono text-zinc-600 uppercase">{test?.duration || '0ms'}</span>
+          {isLoadingLogs && <Loader2 className="w-4 h-4 text-indigo-500 animate-spin" />}
+          <span className="text-[10px] font-mono text-zinc-600 uppercase">{durationDisplay}</span>
           {isExpanded ? <ChevronDown className="w-5 h-5 text-zinc-700" /> : <ChevronRight className="w-5 h-5 text-zinc-700 group-hover:text-zinc-500" />}
         </div>
       </button>
 
       {isExpanded && (
         <div className="px-8 pb-10 pt-2 space-y-10 animate-in fade-in slide-in-from-top-2 duration-300">
+          {/* Metadata Grid */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 ml-12">
-             <MetaBox icon={<Cpu />} label="Worker" value={test?.worker_id} />
-             <MetaBox icon={<Layers />} label="Project" value={test?.project} />
-             <MetaBox icon={<HardDrive />} label="Platform" value={test?.os} />
-             <MetaBox icon={<Monitor />} label="Browser" value={test?.browser} />
+             <MetaBox icon={<Cpu />} label="Worker" value={workerId} />
+             <MetaBox icon={<Layers />} label="Project" value={project} />
+             <MetaBox icon={<HardDrive />} label="Platform" value={os} />
+             <MetaBox icon={<Monitor />} label="Browser" value={browser} />
           </div>
 
-          {/* Console Logs Terminal - MOVED FIRST */}
+          {/* Console Logs Terminal */}
           {hasLogs && <LogTerminal test={test} />}
 
           {/* Steps Timeline */}
-          {test?.steps?.length > 0 && (
+          {steps.length > 0 && (
             <div className="ml-12 space-y-4">
                <button onClick={() => setStepsExpanded(!stepsExpanded)} className="flex items-center gap-2 text-zinc-500 uppercase text-[10px] font-black tracking-widest hover:text-zinc-400">
                  {stepsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                 <ListTree size={14} /> Execution Timeline ({test.steps.length})
+                 <ListTree size={14} /> Execution Timeline ({steps.length})
                </button>
                {stepsExpanded && (
                  <div className="space-y-1 animate-in fade-in slide-in-from-top-2 duration-200">
-                    {test.steps.map((s: any, idx: number) => <StepItem key={idx} step={s} depth={0} />)}
+                    {steps.map((s: any, idx: number) => <StepItem key={idx} step={s} depth={0} />)}
                  </div>
                )}
             </div>
@@ -163,7 +229,9 @@ export function TestRow({ test, isExpanded, onToggle }: any) {
                     <div className="space-y-3">
                         <div className="flex items-center justify-between px-1 text-zinc-500 font-black text-[10px] uppercase tracking-widest">
                            <div className="flex items-center gap-2"><Video size={16} /> Recording</div>
-                           <a href={videoUrl} target="_blank" rel="noopener noreferrer" className="hover:text-indigo-400 transition-colors"><ExternalLink size={12} /></a>
+                           <a href={videoUrl} target="_blank" rel="noopener noreferrer" className="hover:text-indigo-400 transition-colors">
+                             <ExternalLink size={12} />
+                           </a>
                         </div>
                         <video controls className="w-full rounded-3xl border border-white/10 bg-black shadow-2xl aspect-video">
                             <source src={videoUrl} type="video/webm" />
@@ -175,23 +243,30 @@ export function TestRow({ test, isExpanded, onToggle }: any) {
                         <div className="text-zinc-500 font-black text-[10px] uppercase tracking-widest px-1 flex items-center gap-2">
                            <Monitor size={16} /> Failure Trace
                         </div>
-                        <img src={screenshotUrl} alt="Failure" className="w-full rounded-3xl border border-white/10 bg-black shadow-2xl aspect-video object-cover cursor-zoom-in" onClick={() => window.open(screenshotUrl, '_blank')} />
+                        <img 
+                          src={screenshotUrl} 
+                          alt="Failure" 
+                          className="w-full rounded-3xl border border-white/10 bg-black shadow-2xl aspect-video object-cover cursor-zoom-in" 
+                          onClick={() => window.open(screenshotUrl, '_blank')} 
+                        />
                     </div>
                 )}
             </div>
           )}
 
           {/* Final Error Trace */}
-          {test?.error && (
+          {error && (
             <div className="ml-12 space-y-3">
-              <div className="flex items-center gap-2 text-rose-500/50 text-[10px] font-black uppercase tracking-widest px-1"><Terminal size={16} /> Final Error</div>
+              <div className="flex items-center gap-2 text-rose-500/50 text-[10px] font-black uppercase tracking-widest px-1">
+                <Terminal size={16} /> Final Error
+              </div>
               <div className="p-6 bg-rose-500/[0.03] border border-rose-500/10 rounded-[2rem]">
                 <pre className="text-rose-400 font-mono text-[11px] whitespace-pre-wrap leading-relaxed overflow-x-auto">
-                  {formatDisplayLabel(test.error.message || test.error)}
+                  {formatDisplayLabel(error.message || error)}
                 </pre>
-                {test.error.stack && (
+                {error.stack && (
                   <pre className="mt-4 pt-4 border-t border-rose-500/10 text-zinc-600 font-mono text-[10px] whitespace-pre-wrap leading-relaxed">
-                    {formatDisplayLabel(test.error.stack)}
+                    {formatDisplayLabel(error.stack)}
                   </pre>
                 )}
               </div>
