@@ -1,87 +1,117 @@
 'use client';
-
 import React from "react";
-import { ChevronDown, ShieldCheck, ShieldAlert, Tag, Clock, AlertCircle, ImageIcon } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, Monitor, ChevronDown, ChevronRight, ListTree, AlertTriangle } from "lucide-react";
+import { LogTerminal } from "./LogTerminal";
 import { cn } from "@/lib/utils";
-import { TestStepLog } from "./TestStepLog";
+
+/* -------------------- UTILS -------------------- */
+
+const cleanAnsi = (t: any) => typeof t === 'string' ? t.replace(/[\u001b\x1b]\[[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '').trim() : t;
+
+/**
+ * Parses stringified Cypress arguments to show only the main value
+ * e.g. '["/login"]' -> '/login'
+ * e.g. '["//button", {"timeout": 20000}]' -> '//button'
+ */
+const formatCypressArgs = (argsString: string): string => {
+  if (!argsString || argsString === "[]") return "";
+  try {
+    const parsed = JSON.parse(argsString);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const mainArg = parsed[0];
+      // If the first arg is a string (selector/URL), return it. 
+      // If it's an object, stringify it simply.
+      return typeof mainArg === 'string' ? mainArg : JSON.stringify(mainArg);
+    }
+    return argsString;
+  } catch (e) {
+    // If it's not valid JSON, just clean ANSI and return
+    return cleanAnsi(argsString);
+  }
+};
+
+/* -------------------- COMPONENT -------------------- */
 
 export function TestResultCard({ test, isExpanded, onToggle }: any) {
-  const isPassed = test.status === "passed";
-
   return (
-    <div className={cn(
-      "relative overflow-hidden rounded-[2rem] border transition-all duration-500",
-      isPassed ? "bg-zinc-900/40 border-emerald-500/10 hover:border-emerald-500/30" : "bg-zinc-900/40 border-rose-500/10 hover:border-rose-500/30",
-      isExpanded && (isPassed ? "ring-1 ring-emerald-500/50 shadow-[0_0_30px_rgba(16,185,129,0.05)]" : "ring-1 ring-rose-500/50 shadow-[0_0_30px_rgba(244,63,94,0.05)]")
-    )}>
-      <div className="p-6 cursor-pointer flex items-center justify-between" onClick={onToggle}>
-        <div className="flex items-center gap-6">
-          {/* Status Hexagon */}
-          <div className={cn(
-            "w-12 h-12 rounded-2xl flex items-center justify-center border shadow-inner",
-            isPassed ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-rose-500/10 border-rose-500/20 text-rose-400"
-          )}>
-            {isPassed ? <ShieldCheck className="w-6 h-6" /> : <ShieldAlert className="w-6 h-6" />}
+    <div className={cn("border border-white/5 rounded-3xl transition-all duration-300", isExpanded ? "bg-[#0c0c0e] border-indigo-500/20 shadow-2xl" : "bg-[#09090b] hover:bg-white/[0.01]")}>
+      
+      {/* ... Header remains the same ... */}
+      <div onClick={onToggle} className="px-8 py-5 flex items-center justify-between cursor-pointer">
+        <div className="flex items-center gap-5">
+          <div className={cn("p-2 rounded-xl border", test.status === 'passed' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" : "bg-rose-500/10 border-rose-500/20 text-rose-500")}>
+            {test.status === 'passed' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
           </div>
-
-          <div className="space-y-1.5">
-            <h4 className="text-sm font-black text-white uppercase tracking-tight leading-none">
-              {test.title}
-            </h4>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1.5 text-zinc-500">
-                <Clock className="w-3.5 h-3.5" />
-                <span className="text-[10px] font-mono tabular-nums uppercase">{test.duration}</span>
-              </div>
-              {test.case_codes?.map((code: string) => (
-                <div key={code} className="flex items-center gap-1.5 text-zinc-400 bg-white/5 px-2 py-0.5 rounded-lg border border-white/5">
-                  <Tag className="w-2.5 h-2.5 text-indigo-400" />
-                  <span className="text-[9px] font-black">{code}</span>
-                </div>
-              ))}
+          <div>
+            <div className="flex items-center gap-2 mb-0.5">
+                <span className="text-[8px] font-black bg-white/10 text-zinc-400 px-1.5 py-0.5 rounded uppercase tracking-widest">Run {test.run_number}</span>
             </div>
+            <h3 className="text-sm font-bold text-zinc-200">{cleanAnsi(test.title)}</h3>
           </div>
         </div>
-
-        <ChevronDown className={cn("w-5 h-5 text-zinc-600 transition-transform duration-500", isExpanded && "rotate-180 text-white")} />
+        <div className="flex items-center gap-6">
+          <span className="text-[10px] font-mono text-zinc-600 uppercase">{test.duration}</span>
+          {isExpanded ? <ChevronDown size={16} className="text-zinc-500" /> : <ChevronRight size={16} className="text-zinc-700" />}
+        </div>
       </div>
 
       {isExpanded && (
-        <div className="px-8 pb-10 space-y-10 animate-in fade-in slide-in-from-top-4 duration-500">
-            {/* Failure Exception Box */}
-            {!isPassed && (
-                <div className="rounded-2xl bg-rose-500/5 border border-rose-500/10 p-5 font-mono">
-                    <div className="flex items-center gap-2 text-rose-400 mb-3">
-                        <AlertCircle className="w-4 h-4" />
-                        <span className="text-[10px] font-black uppercase tracking-widest">Exception Trace</span>
+        <div className="px-8 pb-10 space-y-10 animate-in fade-in slide-in-from-top-1">
+          
+          {/* Lazy Loaded Logs */}
+          {test.logs?.length > 0 && <LogTerminal test={test} />}
+          
+          {/* Execution Steps */}
+          {test.steps?.length > 0 && (
+            <div className="ml-12 space-y-4">
+              <div className="flex items-center gap-2 text-zinc-600 text-[9px] font-black uppercase tracking-widest px-1">
+                <ListTree size={14} className="text-indigo-500/50" /> Command Log ({test.steps.length})
+              </div>
+              <div className="space-y-2">
+                {test.steps.map((s: any, i: number) => (
+                  <div key={i} className="group/step flex items-start gap-4 p-3 bg-white/[0.02] border border-white/5 rounded-2xl hover:bg-white/[0.04] transition-all">
+                    <div className={cn(
+                      "mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 shadow-sm",
+                      s.status === 'passed' ? "bg-emerald-500/40" : "bg-rose-500"
+                    )} />
+                    
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-center mb-0.5">
+                        <span className="text-[11px] font-black text-zinc-400 uppercase tracking-tight group-hover/step:text-zinc-200 transition-colors">
+                          {s.command}
+                        </span>
+                        <span className="text-[9px] font-mono text-zinc-700">{s.duration}</span>
+                      </div>
+                      
+                      {/* ✅ PARSED ARGUMENTS: This handles the messy JSON from your screenshot */}
+                      <p className="text-[11px] text-zinc-500 font-mono break-all leading-relaxed line-clamp-2 italic">
+                        {formatCypressArgs(s.arguments)}
+                      </p>
                     </div>
-                    <p className="text-xs text-rose-200/80 leading-relaxed mb-4">{test.error}</p>
-                    {test.stack_trace && (
-                        <pre className="text-[9px] text-rose-500/40 bg-black/40 p-4 rounded-xl overflow-x-auto whitespace-pre-wrap">
-                            {test.stack_trace}
-                        </pre>
-                    )}
-                </div>
-            )}
-
-            {/* Step Flow Timeline */}
-            <div className="space-y-6">
-                <p className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] border-l-2 border-zinc-800 pl-4">Test Execution Flow</p>
-                <TestStepLog steps={test.steps} />
+                  </div>
+                ))}
+              </div>
             </div>
+          )}
 
-            {/* Screenshots */}
-            {test.screenshot_url && (
-                <div className="space-y-4">
-                    <div className="flex items-center gap-2 text-zinc-500 border-l-2 border-zinc-800 pl-4">
-                        <ImageIcon className="w-3.5 h-3.5" />
-                        <span className="text-[10px] font-black uppercase tracking-widest">Visual Evidence</span>
-                    </div>
-                    <div className="rounded-[2rem] border border-white/10 overflow-hidden shadow-2xl bg-black">
-                        <img src={test.screenshot_url} className="w-full opacity-80 hover:opacity-100 transition-opacity duration-700" alt="Failure Artifact" />
-                    </div>
-                </div>
-            )}
+          {/* Error Message */}
+          {test.status === 'failed' && (
+            <div className="ml-12 p-6 bg-rose-500/[0.03] border border-rose-500/10 rounded-[2rem] shadow-inner">
+               <div className="flex items-center gap-2 text-rose-500 text-[9px] font-black uppercase tracking-widest mb-4">
+                 <AlertTriangle size={14} /> Assertion Failure
+               </div>
+               <pre className="text-rose-400/90 font-mono text-xs whitespace-pre-wrap leading-relaxed overflow-x-auto">
+                 {cleanAnsi(test.error?.message || test.error)}
+               </pre>
+               {test.stack_trace && (
+                 <div className="mt-6 pt-6 border-t border-rose-500/10">
+                    <pre className="text-zinc-600 font-mono text-[10px] leading-relaxed overflow-x-auto custom-scrollbar max-h-60">
+                      {cleanAnsi(test.stack_trace)}
+                    </pre>
+                 </div>
+               )}
+            </div>
+          )}
         </div>
       )}
     </div>
