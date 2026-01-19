@@ -40,7 +40,7 @@ export default function Home() {
         </div>
 
         {/* Navigation Items */}
-        <nav className="p-3 space-y-1 flex-1 overflow-y-auto custom-scrollbar">
+        <nav className="p-5 space-y-1 flex-1 overflow-y-auto custom-scrollbar">
           
           <div className="px-3 py-4">
              <span className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.25em] font-mono">Infrastructure</span>
