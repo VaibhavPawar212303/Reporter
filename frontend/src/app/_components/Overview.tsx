@@ -4,15 +4,14 @@ import React, { useEffect, useState, useMemo } from "react";
 import { getDashboardStats } from "@/lib/actions";
 import { 
   Zap, Shield, Activity, Globe, Cpu, PlayCircle, 
-  Play, TrendingUp, BarChart3, Loader2
+  TrendingUp, BarChart3, ChevronRight, Loader2, Server, Command, Box
 } from "lucide-react";
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, 
   Tooltip, ResponsiveContainer
 } from 'recharts';
-
 import { cn } from "@/lib/utils";
-// Ensure this path is correct based on your folder structure
+import Link from "next/link";
 import { StatusBadge } from "../(route)/cypress/dashboard/_components/StatusBadge";
 
 export default function Overview() {
@@ -26,162 +25,156 @@ export default function Overview() {
     });
   }, []);
 
-  // 🔥 1. Calculate Overall Metrics by scanning the JSONB 'tests' arrays
   const metrics = useMemo(() => {
     if (!data) return null;
     const automatedCodes = new Set();
     let totalPassed = 0;
     let totalFailed = 0;
 
-    data.builds.forEach((b: any) => {
-      b.results?.forEach((spec: any) => {
-        // results table has a 'tests' column which is our JSONB array
-        const testsArray = Array.isArray(spec.tests) ? spec.tests : [];
-        
-        testsArray.forEach((t: any) => {
-          const status = t.status?.toLowerCase();
-          if (status === 'passed' || status === 'expected' || status === 'success') totalPassed++;
-          if (status === 'failed' || status === 'error') totalFailed++;
-
-          // Extract unique case codes for coverage
-          const codes = t.case_codes || (t.case_code ? [t.case_code] : []);
-          codes.forEach((c: string) => {
-            if (c && c !== 'N/A' && c !== 'UNKNOWN') automatedCodes.add(c);
-          });
-        });
+    data.results?.forEach((row: any) => {
+      const testsArray = Array.isArray(row.tests) ? row.tests : [];
+      testsArray.forEach((t: any) => {
+        const status = t.status?.toLowerCase();
+        if (['passed', 'expected', 'success'].includes(status)) totalPassed++;
+        if (['failed', 'error'].includes(status)) totalFailed++;
+        const codes = t.case_codes || [];
+        codes.forEach((c: string) => { if (c && c !== 'N/A') automatedCodes.add(c); });
       });
     });
 
-    const totalReqs = data.totalRequirements || 1; // Prevent div by zero
-    const coverage = Math.round((automatedCodes.size / totalReqs) * 100);
-    
-    const totalExecuted = totalPassed + totalFailed;
-    const successRate = totalExecuted > 0 ? Math.round((totalPassed / totalExecuted) * 100) : 0;
-
+    const coverage = data.totalRequirements > 0 ? Math.round((automatedCodes.size / data.totalRequirements) * 100) : 0;
     return {
       coverage,
-      totalPassed,
-      totalFailed,
-      successRate,
+      successRate: (totalPassed + totalFailed) > 0 ? Math.round((totalPassed / (totalPassed + totalFailed)) * 100) : 0,
       automatedCount: automatedCodes.size,
       activeBuilds: data.builds.filter((b: any) => b.status === 'running').length
     };
   }, [data]);
 
-  // 🔥 2. Transform Data for Split Charts (PW vs CY)
-  const transformBuildData = (builds: any[]) => {
-    return builds
-      .slice(0, 8) // Last 8 builds per framework
-      .reverse()   // Chronological order for chart
-      .map((b: any) => {
-        let buildPassed = 0;
-        let buildTotal = 0;
-        
-        b.results?.forEach((spec: any) => {
-          const testsArray = Array.isArray(spec.tests) ? spec.tests : [];
-          testsArray.forEach((t: any) => {
-            buildTotal++;
-            const status = t.status?.toLowerCase();
-            if (status === 'passed' || status === 'expected' || status === 'success') buildPassed++;
+  const chartData = useMemo(() => {
+    if (!data) return { pw: [], cy: [] };
+    const getTrend = (type: string) => {
+      return data.builds
+        .filter((b: any) => b.type?.toLowerCase() === type)
+        .slice(0, 10).reverse()
+        .map((b: any) => {
+          let passed = 0; let total = 0;
+          data.results.filter((r: any) => r.buildId === b.id).forEach((r: any) => {
+            r.tests?.forEach((t: any) => {
+              total++;
+              if (['passed', 'expected', 'success'].includes(t.status?.toLowerCase())) passed++;
+            });
           });
+          return { name: `#${b.id}`, passed, total };
         });
-        
-        return { 
-          name: `#${b.id}`, 
-          passed: buildPassed, 
-          total: buildTotal 
-        };
-      });
-  };
-
-  const playwrightData = useMemo(() => 
-    data ? transformBuildData(data.builds.filter((b: any) => b.type === 'playwright')) : [], 
-  [data]);
-
-  const cypressData = useMemo(() => 
-    data ? transformBuildData(data.builds.filter((b: any) => b.type === 'cypress')) : [], 
-  [data]);
+    };
+    return { pw: getTrend('playwright'), cy: getTrend('cypress') };
+  }, [data]);
 
   if (loading) return (
-    <div className="h-full flex items-center justify-center bg-[#09090b]">
-      <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+    <div className="h-screen flex items-center justify-center bg-[#09090b]">
+      <Loader2 className="w-6 h-6 text-zinc-500 animate-spin" />
     </div>
   );
 
   return (
-    <div className="p-10 space-y-10 overflow-y-auto h-full custom-scrollbar bg-[#09090b]">
-      <header>
-        <h1 className="text-4xl font-black text-white tracking-tighter uppercase">Command Center</h1>
-        <p className="text-zinc-500 text-sm mt-1">Cross-framework execution health and requirement coverage.</p>
+    <div className="p-8 space-y-8 overflow-y-auto h-full bg-[#0c0c0e] custom-scrollbar font-sans">
+      {/* HEADER SECTION - AWS CONSOLE STYLE */}
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-zinc-800 pb-8">
+        <div>
+          <div className="flex items-center gap-2 text-zinc-500 mb-2">
+             <Server size={12} />
+             <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Infrastructure / Analytics / Global</span>
+          </div>
+          <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
+            <Command size={28} className="text-indigo-500" />
+            Control Tower
+          </h1>
+        </div>
+        <div className="flex gap-2">
+            <Link href="/cypress" className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 text-[10px] font-bold rounded-sm transition-all uppercase tracking-widest flex items-center gap-2">
+                Cypress Dashboard
+            </Link>
+            <Link href="/playwright" className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 text-[10px] font-bold rounded-sm transition-all uppercase tracking-widest flex items-center gap-2">
+                Playwright Dashboard
+            </Link>
+        </div>
       </header>
 
-      {/* TOP STATS GRID */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard title="Overall Coverage" value={`${metrics?.coverage}%`} sub={`${metrics?.automatedCount} Automated`} icon={<Shield className="text-indigo-500" />} />
-        <StatCard title="Active Executions" value={metrics?.activeBuilds} sub="Workers streaming" icon={<Activity className="text-yellow-500" />} pulse={metrics?.activeBuilds > 0} />
-        <StatCard title="Master Library" value={data.totalRequirements} sub="Defined Test Cases" icon={<Globe className="text-emerald-500" />} />
-        <StatCard title="Success Rate" value={`${metrics?.successRate}%`} sub="Across all history" icon={<Zap className="text-orange-500" />} />
+      {/* STATS GRID - SQUARE CARDS */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard title="Automation Coverage" value={`${metrics?.coverage}%`} sub={`${metrics?.automatedCount} / ${data.totalRequirements} Cases`} icon={<Shield size={18}/>} color="indigo" />
+        <StatCard title="Active Executions" value={metrics?.activeBuilds} sub="Live Workers" icon={<Activity size={18}/>} pulse={metrics?.activeBuilds > 0} color="amber" />
+        <StatCard title="Success Probability" value={`${metrics?.successRate}%`} sub="Historical Stability" icon={<Zap size={18}/>} color="emerald" />
+        <StatCard title="Total Registry" value={data.builds.length} sub="Build Objects" icon={<BarChart3 size={18}/>} color="zinc" />
       </div>
 
-      {/* TREND CHARTS GRID */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-        <ChartContainer 
-            title="Playwright Reliability" 
-            data={playwrightData} 
-            icon={<Cpu className="text-green-400" />} 
-            color="#10b981" 
-            gradientId="colorPw" 
-        />
-        <ChartContainer 
-            title="Cypress Reliability" 
-            data={cypressData} 
-            icon={<PlayCircle className="text-indigo-400" />} 
-            color="#6366f1" 
-            gradientId="colorCy" 
-        />
+      {/* TREND CHARTS - MAINTAINED ORIGINAL LOOK */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <ChartContainer title="Playwright Reliability Trend" data={chartData.pw} color="#10b981" gradientId="gradPw" />
+        <ChartContainer title="Cypress Reliability Trend" data={chartData.cy} color="#6366f1" gradientId="gradCy" />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* RECENT BUILDS */}
-        <div className="lg:col-span-2 bg-[#0c0c0e] border border-white/5 rounded-[2.5rem] p-8 shadow-2xl space-y-6">
-            <h2 className="text-xl font-black text-white tracking-tight uppercase">Latest Activity</h2>
-            <div className="space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* RECENT ACTIVITY */}
+        <div className="lg:col-span-2 bg-[#111114] border border-zinc-800 rounded-sm shadow-sm flex flex-col">
+            <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
+                <h2 className="text-xs font-bold text-zinc-100 uppercase tracking-widest flex items-center gap-2">
+                    <Activity size={14} className="text-zinc-500" />
+                    Latest Transmissions
+                </h2>
+                <span className="text-[9px] font-mono text-zinc-600">POLLING_ACTIVE_15S</span>
+            </div>
+            <div className="p-2 divide-y divide-zinc-800/50">
                 {data.builds.slice(0, 6).map((b: any) => (
-                    <div key={b.id} className="group flex items-center justify-between p-5 bg-white/[0.02] border border-white/5 rounded-3xl hover:bg-white/[0.04] transition-all">
-                        <div className="flex items-center gap-5">
-                            <div className={cn("w-10 h-10 rounded-2xl flex items-center justify-center border", 
-                                b.type === 'playwright' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" : "bg-indigo-500/10 border-indigo-500/20 text-indigo-500")}>
-                                {b.type === 'playwright' ? <Cpu className="w-5 h-5" /> : <PlayCircle className="w-5 h-5" />}
+                    <div key={b.id} className="flex items-center justify-between p-4 hover:bg-white/[0.02] transition-colors group cursor-pointer">
+                        <div className="flex items-center gap-4">
+                            <div className={cn("w-1 h-8 rounded-full", 
+                                b.type === 'playwright' ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]" : "bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.3)]")}>
                             </div>
                             <div>
-                                <h3 className="font-bold text-zinc-100 flex items-center gap-2">
-                                  Build #{b.id} 
-                                  <span className="text-[10px] text-zinc-600 uppercase font-bold tracking-widest">{b.type}</span>
-                                </h3>
-                                <p className="text-[10px] text-zinc-500 uppercase font-black tracking-tighter mt-0.5">{new Date(b.createdAt).toLocaleDateString()} • {b.environment}</p>
+                                <h3 className="text-xs font-bold text-zinc-200 font-mono">BUILD_REF_{b.id}</h3>
+                                <p className="text-[10px] text-zinc-500 uppercase mt-0.5 font-bold tracking-tighter">
+                                  {b.type} • {b.environment} • {new Date(b.createdAt).toLocaleTimeString()}
+                                </p>
                             </div>
                         </div>
-                        <StatusBadge status={b.status} />
+                        <div className="flex items-center gap-4">
+                            <StatusBadge status={b.status} />
+                            <ChevronRight size={14} className="text-zinc-700 group-hover:text-zinc-400 transition-colors" />
+                        </div>
                     </div>
                 ))}
             </div>
         </div>
 
-        {/* PROGRESS BOX */}
-        <div className="bg-indigo-600 rounded-[2.5rem] p-8 shadow-2xl text-white relative overflow-hidden">
-            <div className="absolute -top-10 -right-10 w-40 h-40 bg-white/10 rounded-full blur-3xl" />
-            <h2 className="text-xl font-black uppercase tracking-tighter relative z-10">Automation Progress</h2>
-            <div className="py-14 text-center">
-                 <div className="text-8xl font-black tracking-tighter">{metrics?.coverage}%</div>
-                 <p className="text-indigo-200 text-xs font-bold uppercase tracking-widest mt-2">Library Coverage</p>
+        {/* PROGRESS PANEL */}
+        <div className="bg-[#111114] border border-zinc-800 rounded-sm shadow-sm flex flex-col">
+            <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50">
+              <h2 className="text-xs font-bold text-zinc-100 uppercase tracking-widest flex items-center gap-2">
+                <TrendingUp size={14} className="text-zinc-500" />
+                Coverage Velocity
+              </h2>
             </div>
-            <div className="bg-black/20 p-6 rounded-3xl backdrop-blur-md border border-white/10 space-y-4">
-                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
-                    <span>{metrics?.automatedCount} Automated</span>
-                    <span>{data.totalRequirements} Total</span>
+            <div className="p-10 flex-1 flex flex-col justify-center items-center">
+                <div className="text-center space-y-2 mb-8">
+                    <div className="text-7xl font-light text-white tracking-tighter font-mono">{metrics?.coverage}%</div>
+                    <p className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em]">Requirement Sync</p>
                 </div>
-                <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
-                    <div className="h-full bg-white transition-all duration-1000" style={{ width: `${metrics?.coverage}%` }} />
+                <div className="w-full space-y-6">
+                    <div className="h-1.5 w-full bg-zinc-800 rounded-none overflow-hidden">
+                        <div className="h-full bg-indigo-500 transition-all duration-1000 shadow-[0_0_15px_rgba(99,102,241,0.5)]" style={{ width: `${metrics?.coverage}%` }} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-8 pt-6 border-t border-zinc-800/50 w-full">
+                        <div>
+                            <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">Automated</p>
+                            <p className="text-2xl font-bold text-zinc-100 font-mono">{metrics?.automatedCount}</p>
+                        </div>
+                        <div className="text-right">
+                            <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">Master List</p>
+                            <p className="text-2xl font-bold text-zinc-100 font-mono">{data.totalRequirements}</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -190,14 +183,16 @@ export default function Overview() {
   );
 }
 
-function ChartContainer({ title, data, icon, color, gradientId }: any) {
+// --- Square AWS Components ---
+
+function ChartContainer({ title, data, color, gradientId }: any) {
   return (
-    <div className="bg-[#0c0c0e] border border-white/5 rounded-[2.5rem] p-8 shadow-2xl space-y-6">
-      <div className="flex items-center gap-3">
-          <div className="p-2 bg-white/5 rounded-lg border border-white/5">{icon}</div>
-          <h2 className="text-sm font-black text-white tracking-widest uppercase">{title}</h2>
+    <div className="bg-[#111114] border border-zinc-800 rounded-sm shadow-sm flex flex-col overflow-hidden">
+      <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
+          <h2 className="text-[10px] font-black text-zinc-400 tracking-widest uppercase">{title}</h2>
+          <div className="w-2 h-2 rounded-full bg-zinc-800" />
       </div>
-      <div className="h-[220px] w-full">
+      <div className="h-[250px] w-full p-6">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data}>
             <defs>
@@ -206,15 +201,17 @@ function ChartContainer({ title, data, icon, color, gradientId }: any) {
                 <stop offset="95%" stopColor={color} stopOpacity={0}/>
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff05" />
-            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#52525b', fontSize: 9, fontWeight: 800}} dy={10} />
-            <YAxis axisLine={false} tickLine={false} tick={{fill: '#52525b', fontSize: 9, fontWeight: 800}} />
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#27272a" />
+            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#52525b', fontSize: 10, fontWeight: 700}} dy={10} />
+            <YAxis hide domain={['auto', 'auto']} />
             <Tooltip 
-              contentStyle={{backgroundColor: '#111', border: '1px solid #333', borderRadius: '12px'}}
-              itemStyle={{fontSize: '11px', fontWeight: 'bold'}}
+               contentStyle={{backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '4px', boxShadow: '0 10px 15px rgba(0,0,0,0.5)'}}
+               itemStyle={{fontSize: '11px', fontWeight: 'bold', color: '#fff'}}
             />
-            <Area type="monotone" dataKey="total" stroke="#3f3f46" strokeWidth={2} fill="transparent" strokeDasharray="5 5" />
-            <Area type="monotone" dataKey="passed" stroke={color} strokeWidth={3} fillOpacity={1} fill={`url(#${gradientId})`} />
+            {/* Maintain Total Line for context */}
+            <Area type="monotone" dataKey="total" stroke="#3f3f46" strokeWidth={1} fill="transparent" strokeDasharray="4 4" />
+            {/* Smooth Monotone Curve as requested */}
+            <Area type="monotone" dataKey="passed" stroke={color} strokeWidth={3} fill={`url(#${gradientId})`} fillOpacity={1} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -222,16 +219,26 @@ function ChartContainer({ title, data, icon, color, gradientId }: any) {
   );
 }
 
-function StatCard({ title, value, sub, icon, pulse }: any) {
+function StatCard({ title, value, sub, icon, pulse, color }: any) {
+  const accentColors: any = {
+    indigo: 'border-t-indigo-500',
+    amber: 'border-t-amber-500',
+    emerald: 'border-t-emerald-500',
+    zinc: 'border-t-zinc-500'
+  };
+
   return (
-    <div className="bg-[#0c0c0e] border border-white/5 p-6 rounded-[2rem] shadow-xl hover:border-indigo-500/10 transition-all group">
-      <div className="flex justify-between items-start mb-4">
-        <div className="p-3 bg-white/5 rounded-2xl group-hover:scale-110 transition-transform border border-white/5">{icon}</div>
-        {pulse && <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-ping" />}
+    <div className={cn(
+      "bg-[#111114] border border-zinc-800 border-t-2 rounded-sm p-8 shadow-sm hover:bg-zinc-900/50 transition-all duration-300 group",
+      accentColors[color]
+    )}>
+      <div className="flex justify-between items-center mb-6">
+        <div className="text-zinc-500 group-hover:text-white transition-colors">{icon}</div>
+        {pulse && <div className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]" />}
       </div>
-      <h3 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">{title}</h3>
-      <div className="text-3xl font-black text-white tracking-tight mt-1">{value}</div>
-      <p className="text-[10px] text-zinc-600 font-bold mt-1 uppercase">{sub}</p>
+      <h3 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">{title}</h3>
+      <div className="text-4xl font-bold text-white tracking-tighter font-mono leading-none">{value ?? '0'}</div>
+      <p className="text-[9px] text-zinc-600 font-bold mt-3 uppercase italic tracking-widest">{sub}</p>
     </div>
   );
 }

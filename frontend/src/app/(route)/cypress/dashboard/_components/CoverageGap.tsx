@@ -1,4 +1,3 @@
-// src/app/(route)/cypress/dashboard/_components/CoverageGap.tsx
 import React, { useMemo } from "react";
 import { Stethoscope, Layers, Hash } from "lucide-react";
 

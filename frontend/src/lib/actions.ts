@@ -1,6 +1,6 @@
 "use server"
 
-import { desc, eq, inArray } from 'drizzle-orm';
+import { desc, eq, inArray ,sql} from 'drizzle-orm';
 import { automationBuilds, testCases, testResults } from '../../db/schema';
 import { revalidatePath } from "next/cache";
 import { db } from '../../db';
@@ -71,23 +71,20 @@ export async function updateTestCase(id: number, data: any) {
 }
 
 export async function getDashboardStats() {
-  try {
-    // Fetch builds and cases separately
-    const allBuilds = await db.query.automationBuilds.findMany();
-    const allMasterCases = await db.query.testCases.findMany();
+  const builds = await db.select().from(automationBuilds).orderBy(desc(automationBuilds.id)).limit(50);
+  const totalRequirements = await db.select({ count: sql<number>`count(*)` }).from(testCases);
+  
+  // Fetch results for these specific builds only to save RUs
+  const buildIds = builds.map(b => b.id);
+  const results = buildIds.length > 0 
+    ? await db.select().from(testResults).where(inArray(testResults.buildId, buildIds))
+    : [];
 
-    // If you specifically need the count of results per build, 
-    // you can fetch testResults separately or use a standard join.
-    return {
-      totalBuilds: allBuilds.length,
-      totalRequirements: allMasterCases.length,
-      builds: allBuilds,
-      masterCases: allMasterCases
-    };
-  } catch (error) {
-    console.error("Dashboard Stats Error:", error);
-    return { totalBuilds: 0, totalRequirements: 0, builds: [], masterCases: [] };
-  }
+  return {
+    builds,
+    results, // These are the rows containing the JSON 'tests' column
+    totalRequirements: totalRequirements[0]?.count || 0
+  };
 }
 
 export async function getBuildHistory() {
