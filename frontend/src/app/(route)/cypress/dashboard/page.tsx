@@ -85,10 +85,8 @@ export default function AutomationDashboard() {
 
   return (
     <div className="flex h-screen bg-[#0c0c0e] text-zinc-300 font-sans selection:bg-indigo-500/30 overflow-hidden">
-      
-      {/* SIDEBAR - AWS STYLE */}
       <aside className="w-80 border-r border-zinc-800 bg-[#0b0b0d] flex flex-col shrink-0">
-        <div className="p-6 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
+        <div className="p-5 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
            <div className="flex items-center gap-3">
               <Server size={14} className="text-zinc-500" />
               <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">Registry / CY_ARCHIVE</span>
