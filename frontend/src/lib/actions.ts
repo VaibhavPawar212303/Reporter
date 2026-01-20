@@ -352,3 +352,57 @@ export async function getCypressTrend() {
     return { name: `#${b.id}`, passed: p, total: t };
   }).reverse();
 }
+
+export async function deleteTestCase(id: number) {
+  try {
+    await db.delete(testCases).where(eq(testCases.id, id));
+    return { success: true };
+  } catch (e: any) {
+    console.error("DELETE_ERROR:", e.message);
+    return { error: e.message };
+  }
+}
+
+export async function moveModule(oldPath: string, newPath: string) {
+  try {
+    // Finds all test cases starting with the old folder path and renames them
+    // SQL: UPDATE test_cases SET module_name = REPLACE(module_name, 'Old', 'New') 
+    // WHERE module_name LIKE 'Old%'
+    await db.update(testCases)
+      .set({
+        moduleName: sql`REPLACE(${testCases.moduleName}, ${oldPath}, ${newPath})`,
+        updatedAt: new Date()
+      })
+      .where(sql`${testCases.moduleName} LIKE ${oldPath + '%'}`);
+
+    return { success: true };
+  } catch (e: any) {
+    return { error: e.message };
+  }
+}
+
+export async function getAutomationTrend() {
+  try {
+    const result = await db.execute(sql`
+      SELECT DATE(updated_at) as date, COUNT(*) as count
+      FROM test_cases
+      WHERE mode = 'Automation' AND updated_at >= DATE_SUB(CURDATE(), INTERVAL 10 DAY)
+      GROUP BY DATE(updated_at) ORDER BY date ASC
+    `);
+
+    const rows = (result as any)[0] || [];
+    const statsMap = new Map(rows.map((r: any) => [new Date(r.date).toISOString().split('T')[0], r.count]));
+
+    const trendData = [];
+    for (let i = 9; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      trendData.push({
+        name: d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }),
+        automated: statsMap.get(dateStr) || 0
+      });
+    }
+    return trendData;
+  } catch (e) { return []; }
+}
