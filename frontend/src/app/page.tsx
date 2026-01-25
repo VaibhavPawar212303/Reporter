@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { 
   Bot, TestTube, FileCode, Bug, Settings, MessageSquare, 
   PenTool, PlayCircle, Book, LayoutDashboard, Server, 
-  Command, Cpu, Terminal, Database 
+  Command, Cpu, Terminal, Database, ListTodo 
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -65,23 +65,6 @@ export default function Home() {
             onClick={() => setActiveView("cypress")} 
           />
           
-          {/* <div className="px-3 py-4 mt-4 border-t border-zinc-800/50">
-             <span className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.25em] font-mono">Intelligence</span>
-          </div> */}
-
-          {/* <NavItem 
-            icon={<MessageSquare />} 
-            label="AI Debug Chat" 
-            active={activeView === "chat"} 
-            onClick={() => setActiveView("chat")} 
-          />
-          <NavItem 
-            icon={<FileCode />} 
-            label="Script Architect" 
-            active={activeView === "architect"} 
-            onClick={() => setActiveView("architect")} 
-          /> */}
-
           <div className="px-3 py-4 mt-4 border-t border-zinc-800/50">
              <span className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.25em] font-mono">Registry</span>
           </div>
@@ -92,20 +75,20 @@ export default function Home() {
             active={activeView === "test-cases"} 
             onClick={() => setActiveView("test-cases")} 
           />
+          
+          {/* UPDATED: Using Bug icon for the NavItem and correctly setting the view */}
           {/* <NavItem 
-            icon={<PenTool />} 
-            label="Builder Studio" 
-            active={activeView === "testcases"} 
-            onClick={() => setActiveView("testcases")} 
+            icon={<Bug />} 
+            label="Clickup Tasks" 
+            active={activeView === "clickuptasks"} 
+            onClick={() => setActiveView("clickuptasks")} 
           /> */}
+
         </nav>
 
         {/* Footer Area */}
         <div className="p-3 border-t border-zinc-800 bg-zinc-900/10">
-          {/* <button className="flex items-center gap-3 p-3 text-zinc-500 hover:text-white transition-colors w-full group rounded-sm">
-            <Settings className="w-4 h-4 group-hover:rotate-90 transition-transform duration-500" />
-            <span className="hidden lg:block font-bold text-[10px] uppercase tracking-widest">Global Settings</span>
-          </button> */}
+          {/* Footer content if any */}
         </div>
       </aside>
 
@@ -122,6 +105,9 @@ export default function Home() {
           {activeView === "test-cases" && <TestCaseManager />} 
           {activeView === "cypress" && <CypressDashboard />}
           {activeView === "playwright" && <PlaywrightDashboard />}
+          
+          {/* UPDATED: Added rendering for the ClickUp BugTracker view */}
+          {/* {activeView === "clickuptasks" && <BugTracker />} */}
         </div>
       </main>
     </div>

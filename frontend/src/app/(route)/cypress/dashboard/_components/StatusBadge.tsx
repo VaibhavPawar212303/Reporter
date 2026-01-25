@@ -1,5 +1,3 @@
-import { FilterButton } from "./FilterButton"; // Assuming separate file
-
 export function StatusBadge({ status }: { status: string }) {
   const isRunning = status === 'running';
   const isFailed = status === 'failed';
