@@ -16,9 +16,9 @@ import CypressDashboard from "@/app/(route)/cypress/dashboard/page";
 import TestCaseManager from "./(route)/test-cases/page";
 import PlaywrightDashboard from "./(route)/playwright/dashboard/page";
 import Overview from "./_components/Overview";
-// import BugTracker from "./(route)/clickup/page";
+import BugTracker from "./(route)/clickup/page";
 
-type ViewState = "overview" | "chat" | "architect" | "testcases" | "cypress" | "playwright" | "test-cases";
+type ViewState = "overview" | "chat" | "architect" | "testcases" | "cypress" | "playwright" | "test-cases" | "clickuptasks";
 
 export default function Home() {
   const [activeView, setActiveView] = useState<ViewState>("test-cases");
@@ -78,12 +78,12 @@ export default function Home() {
           />
           
           {/* UPDATED: Using Bug icon for the NavItem and correctly setting the view */}
-          {/* <NavItem 
+          <NavItem 
             icon={<Bug />} 
             label="Clickup Tasks" 
             active={activeView === "clickuptasks"} 
             onClick={() => setActiveView("clickuptasks")} 
-          /> */}
+          />
 
         </nav>
 
@@ -108,7 +108,7 @@ export default function Home() {
           {activeView === "playwright" && <PlaywrightDashboard />}
           
           {/* UPDATED: Added rendering for the ClickUp BugTracker view */}
-          {/* {activeView === "clickuptasks" && <BugTracker />} */}
+          {activeView === "clickuptasks" && <BugTracker />}
         </div>
       </main>
     </div>
