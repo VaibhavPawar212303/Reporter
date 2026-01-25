@@ -14,8 +14,8 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 import { StatusBadge } from "./_components/StatusBadge";
 import { DashboardHeader } from "./_components/DashboardHeader";
-import { MetricCard } from "./_components/MetricCard";
 import { TestResultCard } from "./_components/TestResultCard";
+import { BuildIntelligencePanel } from "./_components/BuildIntelligencePanel"; // Integrated Panel
 import { cn } from "@/lib/utils";
 
 export default function AutomationDashboard() {
@@ -126,14 +126,12 @@ export default function AutomationDashboard() {
                  <p className="text-zinc-500 text-sm mt-1">Cross-build regression analysis and quality intelligence pipeline.</p>
               </header>
 
-              {/* Stat Cards - Square/AWS Style */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <StatCard title="Total Build Objects" value={globalStats?.totalBuilds ?? 0} sub="Historical Registry" icon={<Activity size={18} />} color="zinc" />
                 <StatCard title="Executed Scenarios" value={globalStats?.totalTestsExecuted ?? 0} sub="All Environments" icon={<Target size={18} />} color="indigo" />
                 <StatCard title="Pipeline Stability" value={`${globalStats?.lifetimePassRate ?? 0}%`} sub="Global Pass Rate" icon={<Zap size={18} />} color="emerald" />
               </div>
 
-              {/* Execution Trend Panel */}
               <div className="bg-[#111114] border border-zinc-800 rounded-sm shadow-sm flex flex-col">
                 <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
                   <TrendingUp size={14} className="text-emerald-500" />
@@ -156,12 +154,21 @@ export default function AutomationDashboard() {
           ) : (
             /* --- SCENARIO B: BUILD DETAIL PANEL --- */
             <div className="space-y-8 animate-in fade-in duration-500">
+              
               <DashboardHeader 
                 selectedBuild={buildDetails || selectedBuild} 
                 masterCases={masterCases} 
                 filterStatus={filterStatus} setFilterStatus={setFilterStatus} 
                 specSearch={specSearch} setSpecSearch={setSpecSearch} 
               />
+
+              {/* INTEGRATED BUILD ANALYSIS PANEL */}
+              {!loadingDetails && buildDetails && (
+                <BuildIntelligencePanel 
+                  buildId={selectedBuild?.id} 
+                  buildData={buildDetails} 
+                />
+              )}
 
               {loadingDetails ? (
                 <div className="h-96 flex flex-col items-center justify-center gap-4">
@@ -172,7 +179,6 @@ export default function AutomationDashboard() {
                 <div className="space-y-6">
                   {Object.entries(specGroups).map(([name, group]: [string, any]) => (
                     <div key={name} className="bg-[#111114] border border-zinc-800 rounded-sm shadow-sm overflow-hidden flex flex-col">
-                      {/* Spec Panel Header */}
                       <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex justify-between items-center">
                         <div className="flex items-center gap-4">
                            <div className="p-2 bg-white/5 rounded-sm border border-zinc-800"><FileText size={14} className="text-zinc-400" /></div>
@@ -184,7 +190,6 @@ export default function AutomationDashboard() {
                               </div>
                            </div>
                         </div>
-                        {/* Spec Progress Bar */}
                         <div className="flex items-center gap-4">
                            <div className="w-32 h-1 bg-zinc-800 rounded-none overflow-hidden flex">
                               <div className="h-full bg-emerald-500" style={{ width: `${(group.stats.passed/group.tests.length)*100}%` }} />
@@ -194,7 +199,6 @@ export default function AutomationDashboard() {
                         </div>
                       </div>
 
-                      {/* Nested Tests */}
                       <div className="divide-y divide-zinc-800/50">
                         {group.tests.map((t: any, idx: number) => (
                           <TestResultCard 
@@ -217,7 +221,6 @@ export default function AutomationDashboard() {
   );
 }
 
-// --- Square AWS-Like Stat Component ---
 function StatCard({ title, value, sub, icon, color }: any) {
   const accentColors: any = { indigo: 'border-t-indigo-500', emerald: 'border-t-emerald-500', zinc: 'border-t-zinc-500' };
   return (
@@ -225,7 +228,7 @@ function StatCard({ title, value, sub, icon, color }: any) {
       <div className="flex justify-between items-center mb-4 text-zinc-500 group-hover:text-zinc-300 transition-colors">
         {icon}
       </div>
-      <h3 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">{title}</h3>
+      <h3 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{title}</h3>
       <div className="text-4xl font-bold text-white tracking-tighter font-mono">{value ?? '0'}</div>
       <p className="text-[9px] text-zinc-600 font-bold mt-2 uppercase italic tracking-tighter">{sub}</p>
     </div>

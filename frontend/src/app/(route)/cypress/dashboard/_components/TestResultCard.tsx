@@ -1,115 +1,126 @@
 'use client';
 import React from "react";
-import { CheckCircle2, XCircle, Clock, Monitor, ChevronDown, ChevronRight, ListTree, AlertTriangle } from "lucide-react";
-import { LogTerminal } from "./LogTerminal";
+import { CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, GitCommit } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-/* -------------------- UTILS -------------------- */
 
 const cleanAnsi = (t: any) => typeof t === 'string' ? t.replace(/[\u001b\x1b]\[[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '').trim() : t;
 
-/**
- * Parses stringified Cypress arguments to show only the main value
- * e.g. '["/login"]' -> '/login'
- * e.g. '["//button", {"timeout": 20000}]' -> '//button'
- */
-const formatCypressArgs = (argsString: string): string => {
-  if (!argsString || argsString === "[]") return "";
-  try {
-    const parsed = JSON.parse(argsString);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      const mainArg = parsed[0];
-      // If the first arg is a string (selector/URL), return it. 
-      // If it's an object, stringify it simply.
-      return typeof mainArg === 'string' ? mainArg : JSON.stringify(mainArg);
-    }
-    return argsString;
-  } catch (e) {
-    // If it's not valid JSON, just clean ANSI and return
-    return cleanAnsi(argsString);
-  }
-};
-
-/* -------------------- COMPONENT -------------------- */
-
 export function TestResultCard({ test, isExpanded, onToggle }: any) {
+  const isPassed = test.status === 'passed';
+
+  const branchStyles = [
+    { line: 'border-amber-500', bg: 'bg-amber-500', text: 'text-amber-500' },
+    { line: 'border-sky-500', bg: 'bg-sky-500', text: 'text-sky-500' },
+    { line: 'border-pink-500', bg: 'bg-pink-500', text: 'text-pink-500' },
+    { line: 'border-indigo-500', bg: 'bg-indigo-500', text: 'text-indigo-500' },
+  ];
+
   return (
-    <div className={cn("border border-white/5 rounded-3xl transition-all duration-300", isExpanded ? "bg-[#0c0c0e] border-indigo-500/20 shadow-2xl" : "bg-[#09090b] hover:bg-white/[0.01]")}>
-      
-      {/* ... Header remains the same ... */}
-      <div onClick={onToggle} className="px-8 py-5 flex items-center justify-between cursor-pointer">
-        <div className="flex items-center gap-5">
-          <div className={cn("p-2 rounded-xl border", test.status === 'passed' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" : "bg-rose-500/10 border-rose-500/20 text-rose-500")}>
-            {test.status === 'passed' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
+    <div className={cn(
+      "border bg-[#09090b] rounded-none mb-0.5 transition-all font-mono",
+      isPassed ? "border-zinc-800 hover:border-emerald-500/30" : "border-zinc-800 hover:border-rose-500/30",
+      isExpanded && "border-zinc-700 shadow-xl"
+    )}>
+
+      {/* --- Main Test Header --- */}
+      <div onClick={onToggle} className="px-4 py-2.5 flex items-center justify-between cursor-pointer hover:bg-zinc-900/40 select-none">
+        <div className="flex items-center gap-3">
+          <div className={isPassed ? "text-emerald-500" : "text-rose-500"}>
+            {isPassed ? <CheckCircle2 size={16} strokeWidth={2.5} /> : <XCircle size={16} strokeWidth={2.5} />}
           </div>
-          <div>
-            <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-[8px] font-black bg-white/10 text-zinc-400 px-1.5 py-0.5 rounded uppercase tracking-widest">Run {test.run_number}</span>
-            </div>
-            <h3 className="text-sm font-bold text-zinc-200">{cleanAnsi(test.title)}</h3>
+          <div className="flex items-baseline gap-3">
+            <h3 className="text-[12px] font-bold text-zinc-200 uppercase tracking-tight">{cleanAnsi(test.title)}</h3>
+            <span className="text-[9px] text-zinc-600 uppercase tracking-widest font-black opacity-50">#{test.run_number}</span>
           </div>
         </div>
-        <div className="flex items-center gap-6">
-          <span className="text-[10px] font-mono text-zinc-600 uppercase">{test.duration}</span>
-          {isExpanded ? <ChevronDown size={16} className="text-zinc-500" /> : <ChevronRight size={16} className="text-zinc-700" />}
+        <div className="flex items-center gap-4">
+          <span className="text-[12px] text-zinc-500 tabular-nums flex items-center gap-1"><Clock size={10}/> {test.duration}</span>
+          {isExpanded ? <ChevronDown size={14} className="text-zinc-400" /> : <ChevronRight size={14} className="text-zinc-600" />}
         </div>
       </div>
 
       {isExpanded && (
-        <div className="px-8 pb-10 space-y-10 animate-in fade-in slide-in-from-top-1">
+        <div className="border-t border-zinc-800/50 animate-in fade-in duration-200">
           
-          {/* Lazy Loaded Logs */}
-          {test.logs?.length > 0 && <LogTerminal test={test} />}
-          
-          {/* Execution Steps */}
-          {test.steps?.length > 0 && (
-            <div className="ml-12 space-y-4">
-              <div className="flex items-center gap-2 text-zinc-600 text-[9px] font-black uppercase tracking-widest px-1">
-                <ListTree size={14} className="text-indigo-500/50" /> Command Log ({test.steps.length})
-              </div>
-              <div className="space-y-2">
-                {test.steps.map((s: any, i: number) => (
-                  <div key={i} className="group/step flex items-start gap-4 p-3 bg-white/[0.02] border border-white/5 rounded-2xl hover:bg-white/[0.04] transition-all">
-                    <div className={cn(
-                      "mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 shadow-sm",
-                      s.status === 'passed' ? "bg-emerald-500/40" : "bg-rose-500"
-                    )} />
+          {/* --- SCROLLABLE LOG VIEW --- */}
+          <div className={cn(
+            "max-h-[400px] overflow-y-auto bg-[#0c0c0e] relative custom-scrollbar",
+            "[&::-webkit-scrollbar]:w-2",
+            "[&::-webkit-scrollbar-track]:bg-[#0c0c0e]",
+            "[&::-webkit-scrollbar-thumb]:bg-zinc-800"
+          )}>
+            <div className="flex flex-col">
+              
+              {/* Central Git Rail (Hidden behind nodes) */}
+              <div className="absolute left-[64px] top-0 bottom-0 w-[1px] bg-zinc-800 z-0" />
+
+              {test.steps?.map((step: any, i: number) => {
+                const style = branchStyles[i % branchStyles.length];
+                const isOdd = i % 2 !== 0;
+
+                return (
+                  <div key={i} className={cn(
+                    "flex items-center group relative min-h-[32px] transition-colors border-l-2 border-l-transparent",
+                    isOdd ? "bg-white/[0.02]" : "bg-transparent", // Striping
+                    "hover:bg-blue-500/5 hover:border-l-blue-500"
+                  )}>
                     
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-center mb-0.5">
-                        <span className="text-[11px] font-black text-zinc-400 uppercase tracking-tight group-hover/step:text-zinc-200 transition-colors">
-                          {s.command}
-                        </span>
-                        <span className="text-[9px] font-mono text-zinc-700">{s.duration}</span>
-                      </div>
+                    {/* 1. Index Gutter */}
+                    <div className="w-[44px] shrink-0 text-right pr-3 text-[12px] text-zinc-700 tabular-nums select-none font-bold ml-2">
+                      {(i + 1).toString().padStart(2, '0')}
+                    </div>
+
+                    {/* 2. Git Graph Column (Concise Arcs) */}
+                    <div className="relative w-10 shrink-0 flex justify-center z-10 h-full mt-5">
+                      {/* Arc Curve */}
+                      {isOdd && (
+                        <div className={cn(
+                          "absolute left-[50%] top-[-16px] bottom-[50%] w-4 border-l-[1.5px] border-b-[1.5px] rounded-bl-lg -translate-x-[0.5px] opacity-30",
+                          style.line
+                        )} />
+                      )}
+                      {/* Commit Node */}
+                      <div className={cn(
+                        "w-2 h-2 rounded-full border border-[#0c0c0e] z-20",
+                        style.bg,
+                        step.status === 'failed' && "bg-rose-600 ring-2 ring-rose-900"
+                      )} />
+                    </div>
+
+                    {/* 3. Concise One-Line Content */}
+                    <div className="flex-1 flex items-center gap-3 px-2 min-w-0 overflow-hidden">
+                      <span className={cn(
+                        "text-[12px] font-black uppercase tracking-tighter shrink-0",
+                        style.text
+                      )}>
+                        {step.command}
+                      </span>
                       
-                      {/* ✅ PARSED ARGUMENTS: This handles the messy JSON from your screenshot */}
-                      <p className="text-[11px] text-zinc-500 font-mono break-all leading-relaxed line-clamp-2 italic">
-                        {formatCypressArgs(s.arguments)}
-                      </p>
+                      <span className="text-[11px] text-zinc-500 truncate font-mono opacity-80 group-hover:opacity-100 transition-opacity">
+                        {step.arguments}
+                      </span>
+                    </div>
+
+                    {/* 4. Metadata / Duration */}
+                    <div className="shrink-0 flex items-center gap-3 px-4">
+                        <span className="text-[8px] text-zinc-700 font-bold uppercase tracking-widest hidden sm:block">vaibhav_sys</span>
+                        <span className="text-[9px] text-zinc-600 tabular-nums font-bold">{step.duration}</span>
                     </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
-          )}
+          </div>
 
-          {/* Error Message */}
-          {test.status === 'failed' && (
-            <div className="ml-12 p-6 bg-rose-500/[0.03] border border-rose-500/10 rounded-[2rem] shadow-inner">
-               <div className="flex items-center gap-2 text-rose-500 text-[9px] font-black uppercase tracking-widest mb-4">
-                 <AlertTriangle size={14} /> Assertion Failure
+          {/* Failure Log Box (Only if test failed) */}
+          {!isPassed && (
+            <div className="p-4 bg-rose-950/20 border-t border-rose-900/30">
+               <div className="flex items-center gap-2 text-rose-500 text-[9px] font-black uppercase tracking-[0.2em] mb-2">
+                 <XCircle size={10} /> Stacktrace_Output
                </div>
-               <pre className="text-rose-400/90 font-mono text-xs whitespace-pre-wrap leading-relaxed overflow-x-auto">
+               <pre className="text-rose-400/80 font-mono text-[10px] whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto custom-scrollbar">
                  {cleanAnsi(test.error?.message || test.error)}
                </pre>
-               {test.stack_trace && (
-                 <div className="mt-6 pt-6 border-t border-rose-500/10">
-                    <pre className="text-zinc-600 font-mono text-[10px] leading-relaxed overflow-x-auto custom-scrollbar max-h-60">
-                      {cleanAnsi(test.stack_trace)}
-                    </pre>
-                 </div>
-               )}
             </div>
           )}
         </div>
