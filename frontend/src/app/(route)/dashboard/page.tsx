@@ -2,17 +2,12 @@
 
 import React, { useEffect, useState, useMemo } from "react";
 import { getDashboardStats } from "@/lib/actions";
-import { 
-  Zap, Shield, Activity, Globe, Cpu, PlayCircle, 
-  TrendingUp, BarChart3, ChevronRight, Loader2, Server, Command, Box
-} from "lucide-react";
-import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, 
-  Tooltip, ResponsiveContainer
-} from 'recharts';
+import { Zap, Shield, Activity, Globe, Cpu, PlayCircle, TrendingUp, BarChart3, ChevronRight, Loader2, Server, Command, Box} from "lucide-react";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer} from 'recharts';
 import { cn } from "@/lib/utils";
 import Link from "next/link";
-import { StatusBadge } from "../(route)/cypress/dashboard/_components/StatusBadge";
+import { StatusBadge } from "../cypress/_components/StatusBadge";
+
 
 export default function Overview() {
   const [data, setData] = useState<any>(null);
