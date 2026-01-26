@@ -443,3 +443,140 @@ export async function getBuildsByProjectAndType(projectId: number, type: string)
     )
     .orderBy(desc(automationBuilds.createdAt));
 }
+export async function getTestCasesByProject(projectId: number) {
+  return await db.select()
+    .from(testCases)
+    .where(eq(testCases.projectId, projectId))
+    .orderBy(desc(testCases.createdAt));
+}
+export async function createTestCase(data: any) {
+  try {
+    await db.insert(testCases).values({
+      projectId: Number(data.projectId),
+      caseCode: data.caseCode.toUpperCase(),
+      title: data.title,
+      moduleName: data.moduleName || 'GENERAL',
+      priority: data.priority || 'medium',
+      steps: data.steps,
+      expectedResult: data.expectedResult,
+      type: 'manual'
+    });
+    
+    revalidatePath(`/projects/${data.projectId}/manual`);
+    return { success: true };
+  } catch (error: any) {
+    console.error("DB Error:", error);
+    return { success: false, error: error.message };
+  }
+}
+const forceSlice = (val: any, limit: number, fallback: string | null = null) => {
+  if (val === undefined || val === null || val === "" || val === "-") return fallback;
+  return String(val).trim().slice(0, limit);
+};
+export async function importTestCases(projectId: number, dataArray: any[]) {
+  try {
+    const formattedData = dataArray.map((item, index) => {
+      // Robust helper to find keys like "ExpectedResult", "Expected Result", or "expected_result"
+      const find = (key: string) => {
+        const normalizedSearch = key.toLowerCase().replace(/[\s_]/g, "");
+        const targetKey = Object.keys(item).find((actualKey) => {
+          return actualKey.toLowerCase().replace(/[\s_]/g, "") === normalizedSearch;
+        });
+        return targetKey ? item[targetKey] : undefined;
+      };
+
+      // Extract specific fields from your JSON
+      const rawExpected = find('expectedResult') || find('expected');
+      const rawPriority = find('priorities') || find('priority') || find('severity');
+      const rawLink = find('shareableTestCaseDetails') || find('shareableLink') || find('link');
+
+      return {
+        projectId: Number(projectId),
+        
+        // Mapping based on your provided JSON structure
+        caseCode: forceSlice(find('caseCode') || find('id'), 100) || `TC-AUTO-${Date.now()}-${index}`,
+        caseKey: forceSlice(find('caseKey'), 100),
+        moduleName: forceSlice(find('moduleName') || find('module'), 100, 'GENERAL'),
+        testSuite: forceSlice(find('testSuite') || find('suite'), 100),
+        loggedUser: forceSlice(find('loggedUser') || find('user'), 100),
+
+        // Text Columns - Forcing ExpectedResult mapping
+        title: String(find('title') || 'Untitled Case'),
+        description: find('description') ? String(find('description')) : null,
+        precondition: find('precondition') ? String(find('precondition')) : null,
+        steps: find('steps') ? String(find('steps')) : null,
+        
+        // SUCCESS: Mapped to 'ExpectedResult' from your JSON
+        expectedResult: rawExpected ? String(rawExpected) : null, 
+        
+        tags: find('tags') ? String(find('tags')) : null,
+        shareableLink: rawLink ? String(rawLink) : null,
+
+        type: forceSlice(find('type'), 50, 'manual'),
+        mode: forceSlice(find('mode'), 50, 'standard'),
+        priority: forceSlice(rawPriority, 20, 'medium'),
+      };
+    });
+
+    // Chunking for performance (TiDB/MySQL)
+    const chunkSize = 50; 
+    for (let i = 0; i < formattedData.length; i += chunkSize) {
+      const chunk = formattedData.slice(i, i + chunkSize);
+      
+      await db.insert(testCases)
+        .values(chunk as any)
+        .onDuplicateKeyUpdate({
+          set: {
+            title: sql`VALUES(title)`,
+            description: sql`VALUES(description)`,
+            precondition: sql`VALUES(precondition)`,
+            steps: sql`VALUES(steps)`,
+            //@ts-ignore
+            expected_result: sql`VALUES(expected_result)`, // DB column name
+            priority: sql`VALUES(priority)`,
+            module_name: sql`VALUES(module_name)`,
+            test_suite: sql`VALUES(test_suite)`,
+            tags: sql`VALUES(tags)`,
+            logged_user: sql`VALUES(logged_user)`,
+            shareable_link: sql`VALUES(shareable_link)`,
+            updatedAt: new Date()
+          }
+        });
+    }
+    
+    revalidatePath(`/projects/${projectId}/manual`);
+    return { success: true, count: formattedData.length };
+
+  } catch (error: any) {
+    console.error("IMPORT_ERROR:", error);
+    return { success: false, error: "Mapping error: Ensure 'ExpectedResult' column exists." };
+  }
+}
+export async function getProjectManualStats(projectId: number) {
+  const allCases = await db.select().from(testCases).where(eq(testCases.projectId, projectId));
+  
+  // Group by Module
+  const modules = allCases.reduce((acc: any, tc) => {
+    const mod = tc.moduleName || "UNASSIGNED";
+    if (!acc[mod]) acc[mod] = { name: mod, auto: 0, man: 0, total: 0 };
+    acc[mod].total++;
+    // Logic: If mode is 'Automation' it counts as Auto, else Manual
+    if (tc.mode?.toLowerCase() === 'automation') acc[mod].auto++;
+    else acc[mod].man++;
+    return acc;
+  }, {});
+
+  const total = allCases.length;
+  const auto = allCases.filter(c => c.mode?.toLowerCase() === 'automation').length;
+  const man = total - auto;
+
+  return {
+    stats: {
+      total,
+      auto,
+      man,
+      roi: total > 0 ? Math.round((auto / total) * 100) : 0
+    },
+    moduleList: Object.values(modules)
+  };
+}

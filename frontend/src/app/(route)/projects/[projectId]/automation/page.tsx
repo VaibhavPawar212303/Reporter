@@ -58,7 +58,7 @@ export default function ProjectAutomationPage() {
           <span className="text-zinc-300">Automation_Registry</span>
         </div>
 
-        <div className="flex justify-between items-end border-b border-zinc-800 pb-8">
+        <div className="flex justify-between items-end border-b border-zinc-800 pb-4">
             <div>
                 <h1 className="text-4xl font-bold text-white uppercase tracking-tighter italic">Instance History</h1>
                 <p className="text-[10px] text-zinc-500 mt-2 font-bold tracking-widest uppercase">

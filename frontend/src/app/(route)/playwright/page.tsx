@@ -11,8 +11,8 @@ import {
 import {
   Loader2, Activity, Search, Cpu, Shield, Zap, TrendingUp,
   CheckCircle2, XCircle, ArrowUpRight, ArrowDownRight,
-  PieChart as PieChartIcon, Star, Lock, Unlock, LayoutDashboard, ChevronRight,
-  Monitor, Calendar, Server, Command
+  PieChart as PieChartIcon, Star, Lock, Unlock,
+  Monitor, Calendar, Server, Command, ChevronRight
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -82,7 +82,6 @@ export default function PlaywrightDashboard() {
   }, {}), [masterCases]);
 
   const toggleFavorite = (id: string) => setFavorites(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  const generateShareCode = () => setShareCode(Math.random().toString(36).substring(7).toUpperCase());
 
   const loadData = useCallback(async (initial = false) => {
     try {
@@ -153,11 +152,10 @@ export default function PlaywrightDashboard() {
     return { hRate: Math.round(hRate), cRate: Math.round(cRate), diff: parseFloat(diff.toFixed(1)), improve: diff >= 0 };
   }, [trendData, currentStats]);
 
-  // 🔥 Define clean data for Pie Chart with requested colors
   const pieData = useMemo(() => [
-    { name: 'FAIL', value: currentStats.failed, color: '#ef4444' },    // Red
-    { name: 'PASS', value: currentStats.passed, color: '#10b981' },    // Green
-    { name: 'LIVE', value: currentStats.running, color: '#3b82f6' }    // Blue
+    { name: 'FAIL', value: currentStats.failed, color: '#ef4444' },
+    { name: 'PASS', value: currentStats.passed, color: '#10b981' },
+    { name: 'LIVE', value: currentStats.running, color: '#3b82f6' }
   ].filter(d => d.value > 0), [currentStats]);
 
   if (loading) return (
@@ -169,28 +167,9 @@ export default function PlaywrightDashboard() {
   return (
     <div className="flex h-screen bg-[#0c0c0e] text-zinc-300 font-sans selection:bg-indigo-500/30 overflow-hidden">
       
-      {/* SIDEBAR - AWS STYLE */}
-      <aside className="w-80 border-r border-zinc-800 bg-[#0b0b0d] flex flex-col shrink-0">
-        <div className="p-6 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
-           <Server size={14} className="text-zinc-500" />
-           <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">Registry / PW_ARCHIVE</span>
-        </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
-          {builds.map(b => (
-            <button key={b.id} onClick={() => setSelectedBuildId(b.id)} className={cn("w-full text-left p-4 rounded-sm transition-all border group relative", selectedBuildId === b.id ? "bg-zinc-900 border-zinc-700 shadow-inner" : "bg-transparent border-transparent hover:bg-white/[0.02]")}>
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-[10px] font-mono font-bold text-zinc-200">BUILD_ID_{b.id}</span>
-                <StatusBadge status={b.status} />
-              </div>
-              <p className="text-[9px] text-zinc-600 font-bold uppercase">{new Date(b.createdAt).toLocaleDateString()} • {b.environment}</p>
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      {/* MAIN CONTENT */}
+      {/* MAIN CONTENT - Expansion to full width */}
       <main className="flex-1 overflow-y-auto p-8 space-y-8 bg-[#0c0c0e] custom-scrollbar">
-        {/* AWS HEADER - NON CURSIVE */}
+        {/* AWS HEADER */}
         <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-zinc-800 pb-8">
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-zinc-500">
@@ -215,7 +194,7 @@ export default function PlaywrightDashboard() {
           </div>
         </header>
 
-        {/* STATS GRID - SQUARE AWS CARDS */}
+        {/* STATS GRID */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard title="Throughput" value={currentStats.total} sub="Active Scenarios" icon={<Shield size={18}/>} color="indigo" />
           <StatCard title="Reliability" value={currentStats.passed} sub="Success Vector" icon={<CheckCircle2 size={18}/>} color="emerald" />
@@ -243,7 +222,6 @@ export default function PlaywrightDashboard() {
             </div>
           </div>
           
-          {/* PIE CHART - FIXED COLORS */}
           <div className="bg-[#111114] border border-zinc-800 rounded-sm shadow-sm flex flex-col items-center">
             <div className="w-full px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
               <PieChartIcon size={14} className="text-indigo-500" />
@@ -264,11 +242,7 @@ export default function PlaywrightDashboard() {
                        <Cell key={`cell-${index}`} fill={entry.color} />
                      ))}
                    </Pie>
-                   <Legend 
-                     iconType="circle" 
-                     verticalAlign="bottom" 
-                     wrapperStyle={{paddingTop: '20px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase'}} 
-                   />
+                   <Legend iconType="circle" verticalAlign="bottom" wrapperStyle={{paddingTop: '20px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase'}} />
                  </PieChart>
                </ResponsiveContainer>
             </div>

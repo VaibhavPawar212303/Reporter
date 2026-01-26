@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, Suspense } from "react"; // Added Suspense
+import { useSearchParams } from "next/navigation";
 import {
   getBuildHistory, getCypressBuildDetails, getMasterTestCases,
   getCypressTestSteps, getCypressGlobalStats, getCypressTrend
@@ -15,10 +16,15 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { StatusBadge } from "./_components/StatusBadge";
 import { DashboardHeader } from "./_components/DashboardHeader";
 import { TestResultCard } from "./_components/TestResultCard";
-import { BuildIntelligencePanel } from "./_components/BuildIntelligencePanel"; // Integrated Panel
+import { BuildIntelligencePanel } from "./_components/BuildIntelligencePanel";
 import { cn } from "@/lib/utils";
 
-export default function AutomationDashboard() {
+// 1. Move the original logic into a Content component
+function AutomationDashboardContent() {
+  const searchParams = useSearchParams();
+  const urlBuildId = searchParams.get('buildId');
+  const urlProjectId = searchParams.get('projectId');
+
   const [builds, setBuilds] = useState<any[]>([]);
   const [trendData, setTrendData] = useState<any[]>([]);
   const [globalStats, setGlobalStats] = useState<any>(null);
@@ -45,6 +51,31 @@ export default function AutomationDashboard() {
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }, []);
 
+  const loadDirectBuild = useCallback(async (buildId: string) => {
+    try {
+      setLoading(true);
+      setLoadingDetails(true);
+      const [master, details] = await Promise.all([
+        getMasterTestCases(),
+        getCypressBuildDetails(Number(buildId))
+      ]);
+      setMasterCases(master);
+      setBuildDetails(details);
+      setSelectedBuild(details); 
+    } catch (e) { console.error(e); } finally { 
+      setLoading(false); 
+      setLoadingDetails(false); 
+    }
+  }, []);
+
+  useEffect(() => {
+    if (urlBuildId) {
+      loadDirectBuild(urlBuildId);
+    } else {
+      loadInitialData();
+    }
+  }, [urlBuildId, loadDirectBuild, loadInitialData]);
+
   const handleBuildSelect = async (build: any) => {
     setSelectedBuild(build);
     setLoadingDetails(true);
@@ -66,8 +97,6 @@ export default function AutomationDashboard() {
     }
   };
 
-  useEffect(() => { loadInitialData(); }, [loadInitialData]);
-
   const specGroups = useMemo(() => {
     if (!buildDetails?.results) return {};
     return buildDetails.results.reduce((acc: any, res: any) => {
@@ -77,45 +106,46 @@ export default function AutomationDashboard() {
     }, {});
   }, [buildDetails, filterStatus, specSearch]);
 
-  if (loading) return (
+  if (loading && !buildDetails) return (
     <div className="h-screen flex flex-col items-center justify-center bg-[#09090b]">
       <Loader2 className="w-8 h-8 text-zinc-500 animate-spin" />
+      <span className="text-[10px] text-zinc-600 font-mono mt-4 uppercase tracking-[0.3em]">Direct_Build_Link_Auth</span>
     </div>
   );
 
   return (
     <div className="flex h-screen bg-[#0c0c0e] text-zinc-300 font-sans selection:bg-indigo-500/30 overflow-hidden">
-      <aside className="w-80 border-r border-zinc-800 bg-[#0b0b0d] flex flex-col shrink-0">
-        <div className="p-5 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
-           <div className="flex items-center gap-3">
-              <Server size={14} className="text-zinc-500" />
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">Registry / CY_ARCHIVE</span>
-           </div>
-           <button 
-            onClick={() => { setSelectedBuild(null); setBuildDetails(null); }} 
-            className="p-1.5 hover:bg-white/5 rounded-sm transition-colors text-zinc-500"
-          >
-            <LayoutDashboard size={16} />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
-          {builds.map(b => (
-            <button key={b.id} onClick={() => handleBuildSelect(b)} className={cn("w-full text-left p-4 rounded-sm transition-all border group relative", selectedBuild?.id === b.id ? "bg-zinc-900 border-zinc-700 shadow-inner" : "bg-transparent border-transparent hover:bg-white/[0.02]")}>
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-[10px] font-mono font-bold text-zinc-200 uppercase">Build_Ref_{b.id}</span>
-                <StatusBadge status={b.status} />
-              </div>
-              <div className="flex items-center gap-3 text-[9px] text-zinc-600 font-bold uppercase"><Calendar size={10}/> {new Date(b.createdAt).toLocaleDateString()} <span className="opacity-30">•</span> {b.environment}</div>
+      {!urlBuildId && (
+        <aside className="w-80 border-r border-zinc-800 bg-[#0b0b0d] flex flex-col shrink-0">
+            <div className="p-5 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+                <Server size={14} className="text-zinc-500" />
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">Registry / CY_ARCHIVE</span>
+            </div>
+            <button 
+                onClick={() => { setSelectedBuild(null); setBuildDetails(null); }} 
+                className="p-1.5 hover:bg-white/5 rounded-sm transition-colors text-zinc-500"
+            >
+                <LayoutDashboard size={16} />
             </button>
-          ))}
-        </div>
-      </aside>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
+            {builds.map(b => (
+                <button key={b.id} onClick={() => handleBuildSelect(b)} className={cn("w-full text-left p-4 rounded-sm transition-all border group relative", selectedBuild?.id === b.id ? "bg-zinc-900 border-zinc-700 shadow-inner" : "bg-transparent border-transparent hover:bg-white/[0.02]")}>
+                <div className="flex justify-between items-center mb-1">
+                    <span className="text-[10px] font-mono font-bold text-zinc-200 uppercase">Build_Ref_{b.id}</span>
+                    <StatusBadge status={b.status} />
+                </div>
+                <div className="flex items-center gap-3 text-[9px] text-zinc-600 font-bold uppercase"><Calendar size={10}/> {new Date(b.createdAt).toLocaleDateString()} <span className="opacity-30">•</span> {b.environment}</div>
+                </button>
+            ))}
+            </div>
+        </aside>
+      )}
 
       <main className="flex-1 flex flex-col overflow-hidden bg-[#0c0c0e]">
         <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
-          
           {!selectedBuild ? (
-            /* --- SCENARIO A: AWS COMMAND CENTER OVERVIEW --- */
             <div className="space-y-8 animate-in fade-in duration-700">
               <header className="border-b border-zinc-800 pb-8">
                  <div className="flex items-center gap-2 text-zinc-500 mb-2">
@@ -123,72 +153,45 @@ export default function AutomationDashboard() {
                     <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Infrastructure / Cypress Console</span>
                  </div>
                  <h1 className="text-3xl font-bold text-white tracking-tight uppercase">Cypress Command Center</h1>
-                 <p className="text-zinc-500 text-sm mt-1">Cross-build regression analysis and quality intelligence pipeline.</p>
               </header>
-
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <StatCard title="Total Build Objects" value={globalStats?.totalBuilds ?? 0} sub="Historical Registry" icon={<Activity size={18} />} color="zinc" />
-                <StatCard title="Executed Scenarios" value={globalStats?.totalTestsExecuted ?? 0} sub="All Environments" icon={<Target size={18} />} color="indigo" />
-                <StatCard title="Pipeline Stability" value={`${globalStats?.lifetimePassRate ?? 0}%`} sub="Global Pass Rate" icon={<Zap size={18} />} color="emerald" />
+                <StatCard title="Total Builds" value={globalStats?.totalBuilds ?? 0} icon={<Activity size={18} />} color="zinc" />
+                <StatCard title="Scenarios" value={globalStats?.totalTestsExecuted ?? 0} icon={<Target size={18} />} color="indigo" />
+                <StatCard title="Stability" value={`${globalStats?.lifetimePassRate ?? 0}%`} icon={<Zap size={18} />} color="emerald" />
               </div>
-
-              <div className="bg-[#111114] border border-zinc-800 rounded-sm shadow-sm flex flex-col">
-                <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
-                  <TrendingUp size={14} className="text-emerald-500" />
-                  <h2 className="text-[10px] font-black text-zinc-100 uppercase tracking-widest">Efficiency Metrics (Last 10 Runs)</h2>
-                </div>
-                <div className="h-[300px] w-full p-6">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={trendData}>
-                      <defs><linearGradient id="colorP" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#6366f1" stopOpacity={0.1} /><stop offset="95%" stopColor="#6366f1" stopOpacity={0} /></linearGradient></defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#27272a" />
-                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#52525b', fontSize: 10, fontWeight: 700 }} dy={10} />
-                      <YAxis hide />
-                      <Tooltip contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '4px' }} itemStyle={{ color: '#fff', fontSize: '11px', fontWeight: 'bold' }} />
-                      <Area type="monotone" dataKey="passed" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorP)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
+              <div className="bg-[#111114] border border-zinc-800 rounded-sm shadow-sm p-6">
+                 <h2 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+                   <TrendingUp size={14} className="text-indigo-500" /> Reliability Metrics
+                 </h2>
+                 <div className="h-[300px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={trendData}>
+                            <Area type="monotone" dataKey="passed" stroke="#6366f1" fill="#6366f120" />
+                            <CartesianGrid stroke="#ffffff05" vertical={false} />
+                            <XAxis dataKey="name" hide />
+                            <Tooltip contentStyle={{ background: '#000', border: '1px solid #333' }} />
+                        </AreaChart>
+                    </ResponsiveContainer>
+                 </div>
               </div>
             </div>
           ) : (
-            /* --- SCENARIO B: BUILD DETAIL PANEL --- */
             <div className="space-y-8 animate-in fade-in duration-500">
-              
-              <DashboardHeader 
-                selectedBuild={buildDetails || selectedBuild} 
-                masterCases={masterCases} 
-                filterStatus={filterStatus} setFilterStatus={setFilterStatus} 
-                specSearch={specSearch} setSpecSearch={setSpecSearch} 
-              />
-
-              {/* INTEGRATED BUILD ANALYSIS PANEL */}
-              {!loadingDetails && buildDetails && (
-                <BuildIntelligencePanel 
-                  buildId={selectedBuild?.id} 
-                  buildData={buildDetails} 
-                />
-              )}
-
+              <DashboardHeader selectedBuild={buildDetails || selectedBuild} masterCases={masterCases} filterStatus={filterStatus} setFilterStatus={setFilterStatus} specSearch={specSearch} setSpecSearch={setSpecSearch} />
+              {!loadingDetails && buildDetails && <BuildIntelligencePanel buildId={selectedBuild?.id} buildData={buildDetails} />}
               {loadingDetails ? (
-                <div className="h-96 flex flex-col items-center justify-center gap-4">
-                  <Loader2 className="animate-spin text-zinc-500 w-6 h-6" />
-                  <span className="text-zinc-600 text-[9px] font-mono uppercase tracking-widest">GET_SPEC_DATA_FROM_TIDB</span>
+                <div className="h-96 flex flex-col items-center justify-center gap-4 text-zinc-600">
+                  <Loader2 className="animate-spin w-6 h-6" />
+                  <span className="text-[9px] font-mono uppercase tracking-widest italic">Extracting_Artifacts_From_TIDB</span>
                 </div>
               ) : (
                 <div className="space-y-6">
                   {Object.entries(specGroups).map(([name, group]: [string, any]) => (
-                    <div key={name} className="bg-[#111114] border border-zinc-800 rounded-sm shadow-sm overflow-hidden flex flex-col">
+                    <div key={name} className="bg-[#111114] border border-zinc-800 rounded-none overflow-hidden flex flex-col shadow-xl">
                       <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex justify-between items-center">
                         <div className="flex items-center gap-4">
-                           <div className="p-2 bg-white/5 rounded-sm border border-zinc-800"><FileText size={14} className="text-zinc-400" /></div>
-                           <div>
-                              <h3 className="text-xs font-bold text-zinc-100 font-mono tracking-tight uppercase">{name.split('/').pop()}</h3>
-                              <div className="flex gap-4 mt-1">
-                                 <span className="text-[9px] text-zinc-500 uppercase font-bold flex items-center gap-1"><Monitor size={10}/> {group.env.browser}</span>
-                                 <span className="text-[9px] text-zinc-500 uppercase font-bold flex items-center gap-1"><Clock size={10}/> {group.stats.duration}</span>
-                              </div>
-                           </div>
+                           <div className="p-2 border border-zinc-800"><FileText size={14} className="text-zinc-500" /></div>
+                           <h3 className="text-xs font-bold text-zinc-100 font-mono uppercase">{name.split('/').pop()}</h3>
                         </div>
                         <div className="flex items-center gap-4">
                            <div className="w-32 h-1 bg-zinc-800 rounded-none overflow-hidden flex">
@@ -198,15 +201,9 @@ export default function AutomationDashboard() {
                            <span className="text-[10px] font-mono text-zinc-400">{group.stats.passed}/{group.tests.length} PASS</span>
                         </div>
                       </div>
-
-                      <div className="divide-y divide-zinc-800/50">
+                      <div className="divide-y divide-zinc-800/30">
                         {group.tests.map((t: any, idx: number) => (
-                          <TestResultCard 
-                            key={idx} 
-                            test={t} 
-                            isExpanded={expandedTests.includes(`${name}-${idx}`)} 
-                            onToggle={() => toggleTest(`${name}-${idx}`, group.id, t.title)} 
-                          />
+                          <TestResultCard key={`${name}-${idx}`} test={t} isExpanded={expandedTests.includes(`${name}-${idx}`)} onToggle={() => toggleTest(`${name}-${idx}`, group.id, t.title)} />
                         ))}
                       </div>
                     </div>
@@ -221,16 +218,28 @@ export default function AutomationDashboard() {
   );
 }
 
-function StatCard({ title, value, sub, icon, color }: any) {
-  const accentColors: any = { indigo: 'border-t-indigo-500', emerald: 'border-t-emerald-500', zinc: 'border-t-zinc-500' };
+// 2. Export the main component wrapped in Suspense
+export default function AutomationDashboard() {
   return (
-    <div className={cn("bg-[#111114] border border-zinc-800 border-t-2 rounded-sm p-6 shadow-sm group", accentColors[color])}>
-      <div className="flex justify-between items-center mb-4 text-zinc-500 group-hover:text-zinc-300 transition-colors">
-        {icon}
+    <Suspense fallback={
+        <div className="h-screen flex flex-col items-center justify-center bg-[#09090b]">
+            <Loader2 className="w-8 h-8 text-zinc-500 animate-spin" />
+        </div>
+    }>
+      <AutomationDashboardContent />
+    </Suspense>
+  );
+}
+
+function StatCard({ title, value, icon, color }: any) {
+  const accentColors: any = { indigo: 'border-t-indigo-500', emerald: 'border-t-emerald-500', zinc: 'border-t-zinc-700' };
+  return (
+    <div className={cn("bg-[#111114] border border-zinc-800 border-t-2 rounded-none p-8 flex flex-col justify-between min-h-[160px]", accentColors[color])}>
+      <div className="text-zinc-500">{icon}</div>
+      <div>
+        <h3 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">{title}</h3>
+        <div className="text-5xl font-bold text-white tracking-tighter font-mono">{value ?? '0'}</div>
       </div>
-      <h3 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{title}</h3>
-      <div className="text-4xl font-bold text-white tracking-tighter font-mono">{value ?? '0'}</div>
-      <p className="text-[9px] text-zinc-600 font-bold mt-2 uppercase italic tracking-tighter">{sub}</p>
     </div>
   );
 }
