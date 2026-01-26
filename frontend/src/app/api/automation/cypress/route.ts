@@ -4,7 +4,6 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '../../../../../db';
 import { automationBuilds, testResults } from '../../../../../db/schema';
 
-
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -14,7 +13,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    // 1. Verify Build exists
+    // 1. Verify Build exists AND grab the projectId associated with it
     const build = await db.query.automationBuilds.findFirst({
       where: eq(automationBuilds.id, build_id),
     });
@@ -22,6 +21,9 @@ export async function POST(req: Request) {
     if (!build) {
       return NextResponse.json({ error: "Build not found" }, { status: 404 });
     }
+
+    // Capture the projectId from the build record
+    const projectId = build.projectId;
 
     return await db.transaction(async (tx) => {
       // 2. Find existing spec record for this build
@@ -34,7 +36,7 @@ export async function POST(req: Request) {
 
       let updatedTests = existingRecord ? (existingRecord.tests as any[]) : [];
 
-      // 3. Find if this specific test (Title + Project + Run) exists in the JSON array
+      // 3. Find if this specific test exists in the JSON array
       const testIndex = updatedTests.findIndex((t: any) =>
         t.title === test_entry.title &&
         t.project === test_entry.project &&
@@ -42,21 +44,20 @@ export async function POST(req: Request) {
       );
 
       if (testIndex !== -1) {
-        // Update existing test entry (merging logs and status)
         updatedTests[testIndex] = {
           ...updatedTests[testIndex],
           ...test_entry,
           logs: [...(updatedTests[testIndex].logs || []), ...(test_entry.logs || [])]
         };
       } else {
-        // Add new test entry
         updatedTests.push(test_entry);
       }
 
-      // 4. TiDB Atomic Upsert
+      // 4. TiDB Atomic Upsert - Added projectId to the values
       await tx.insert(testResults).values({
-        buildId: build_id,   // Use buildId (camelCase)
-        specFile: spec_file, // Use specFile (camelCase)
+        buildId: build_id,
+        projectId: projectId, // REQUIRED CHANGE: Link result directly to the project
+        specFile: spec_file,
         tests: updatedTests,
         executedAt: new Date(),
       })
@@ -67,7 +68,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true });
     });
   } catch (error: any) {
-    console.error("❌ PLAYWRIGHT API ERROR:", error.message);
+    console.error("❌ AUTOMATION RESULT API ERROR:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

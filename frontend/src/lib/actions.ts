@@ -1,7 +1,7 @@
 "use server"
 
-import { desc, eq, inArray ,sql} from 'drizzle-orm';
-import { automationBuilds, testCases, testResults } from '../../db/schema';
+import { and, desc, eq, inArray ,sql} from 'drizzle-orm';
+import { automationBuilds, projects, testCases, testResults } from '../../db/schema';
 import { revalidatePath } from "next/cache";
 import { db } from '../../db';
 
@@ -50,7 +50,6 @@ export async function uploadMasterTestCases(data: any[]) {
     return { error: e.message };
   }
 }
-
 export async function updateTestCase(id: number, data: any) {
   try {
     const { id: _, createdAt, updatedAt, ...updateData } = data;
@@ -69,7 +68,6 @@ export async function updateTestCase(id: number, data: any) {
     return { error: error.message };
   }
 }
-
 export async function getDashboardStats() {
   const builds = await db.select().from(automationBuilds).orderBy(desc(automationBuilds.id)).limit(50);
   const totalRequirements = await db.select({ count: sql<number>`count(*)` }).from(testCases);
@@ -86,7 +84,6 @@ export async function getDashboardStats() {
     totalRequirements: totalRequirements[0]?.count || 0
   };
 }
-
 export async function getBuildHistory() {
   return await db.select({
     id: automationBuilds.id,
@@ -96,8 +93,6 @@ export async function getBuildHistory() {
     type: automationBuilds.type
   }).from(automationBuilds).orderBy(desc(automationBuilds.id)).limit(30);
 }
-
-// 2. Trend Data: Aggregates last 10 builds (Fixed for TiDB)
 export async function getPlaywrightTrend() {
   try {
     const builds = await db.select({ id: automationBuilds.id })
@@ -124,8 +119,6 @@ export async function getPlaywrightTrend() {
     }).reverse();
   } catch (e) { return []; }
 }
-
-// 3. Build Details: Split query to avoid Lateral Join Error
 export async function getBuildDetails(buildId: number) {
   try {
     const build = await db.query.automationBuilds.findFirst({ where: eq(automationBuilds.id, buildId) });
@@ -145,8 +138,6 @@ export async function getBuildDetails(buildId: number) {
     };
   } catch (e) { return null; }
 }
-
-// 4. Test Steps: Lazy fetch heavy logs on click
 export async function getTestSteps(specId: number, testTitle: string) {
   try {
     // Query the testResults table with the specId
@@ -179,7 +170,6 @@ export async function getTestSteps(specId: number, testTitle: string) {
     return null;
   }
 }
-
 export async function getCypressTestSteps(specId: number, testTitle: string) {
   try {
     // 1. Query the testResults table using the specId (Primary Key)
@@ -220,11 +210,9 @@ export async function getCypressTestSteps(specId: number, testTitle: string) {
     return null;
   }
 }
-
 export async function getMasterTestCases() {
   return await db.query.testCases.findMany({ orderBy: [desc(testCases.updatedAt)] });
 }
-
 export async function getCypressGlobalStats() {
   try {
     const builds = await db.select().from(automationBuilds).where(eq(automationBuilds.type, 'cypress'));
@@ -255,7 +243,6 @@ export async function getCypressGlobalStats() {
     return { totalBuilds: 0, totalTestsExecuted: 0, lifetimePassRate: 0 };
   }
 }
-
 export async function getCypressBuildDetails(buildId: number) {
   try {
     // 1. Fetch the build metadata
@@ -329,7 +316,6 @@ export async function getCypressBuildDetails(buildId: number) {
     return null;
   }
 }
-
 export async function getCypressTrend() {
   const builds = await db.select({ id: automationBuilds.id })
     .from(automationBuilds)
@@ -352,7 +338,6 @@ export async function getCypressTrend() {
     return { name: `#${b.id}`, passed: p, total: t };
   }).reverse();
 }
-
 export async function deleteTestCase(id: number) {
   try {
     await db.delete(testCases).where(eq(testCases.id, id));
@@ -362,7 +347,6 @@ export async function deleteTestCase(id: number) {
     return { error: e.message };
   }
 }
-
 export async function moveModule(oldPath: string, newPath: string) {
   try {
     // Finds all test cases starting with the old folder path and renames them
@@ -380,7 +364,6 @@ export async function moveModule(oldPath: string, newPath: string) {
     return { error: e.message };
   }
 }
-
 export async function getAutomationTrend() {
   try {
     const result = await db.execute(sql`
@@ -405,4 +388,58 @@ export async function getAutomationTrend() {
     }
     return trendData;
   } catch (e) { return []; }
+}
+export async function createProject(formData: { name: string, type: string, environment: string, description?: string }) {
+  try {
+    const res = await db.insert(projects).values({
+      name: formData.name.toUpperCase(),
+      type: formData.type.toLowerCase(),
+      environment: formData.environment.toLowerCase(),
+      description: formData.description || '',
+    });
+    // This refreshes the Project Registry page automatically
+    revalidatePath('/projects');
+    //@ts-ignore
+    return { success: true, id: res[0].insertId };
+  } catch (error) {
+    console.error("Project Creation Error:", error);
+    return { success: false, error: "Failed to register project" };
+  }
+}
+export async function getProjects() {
+  const result = await db.select({
+    id: projects.id,
+    name: projects.name,
+    type: projects.type,
+    environment: projects.environment,
+    // Count builds linked to this project
+    executionCount: sql<number>`(SELECT COUNT(*) FROM ${automationBuilds} WHERE ${automationBuilds.projectId} = ${projects.id})`,
+    // Count test cases linked to this project
+    totalCases: sql<number>`(SELECT COUNT(*) FROM ${testCases} WHERE ${testCases.projectId} = ${projects.id})`,
+  }).from(projects);
+
+  // Map to add UI colors based on the image provided
+  const colors = ["indigo", "amber", "emerald"];
+  
+  return result.map((p, index) => ({
+    ...p,
+    color: colors[index % colors.length],
+    // Coverage logic placeholder: (Actual results logic can be added later)
+    coverage: p.totalCases > 0 ? "100%" : "0%" 
+  }));
+}
+export async function getProjectById(id: number) {
+  const res = await db.select().from(projects).where(eq(projects.id, id));
+  return res[0];
+}
+export async function getBuildsByProjectAndType(projectId: number, type: string) {
+  return await db.select()
+    .from(automationBuilds)
+    .where(
+      and(
+        eq(automationBuilds.projectId, projectId),
+        eq(automationBuilds.type, type.toLowerCase()) // ensures 'Cypress' matches 'cypress'
+      )
+    )
+    .orderBy(desc(automationBuilds.createdAt));
 }
