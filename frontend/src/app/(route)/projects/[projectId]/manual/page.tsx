@@ -2,28 +2,14 @@
 import React, { useEffect, useState, useMemo, Fragment } from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
-import { 
-  PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend 
-} from 'recharts';
-import { 
-  DndContext, closestCenter, PointerSensor, useSensor, useSensors 
-} from '@dnd-kit/core';
-import { 
-  SortableContext, verticalListSortingStrategy, useSortable 
-} from '@dnd-kit/sortable';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { 
-  Edit3, Save, X, Loader2, CheckCircle2, AlertCircle, 
-  Folder, Zap, ChevronDown, ChevronRight, Upload, 
-  Hash, Type, Filter, Server, Command, 
-  MousePointerClick, PlayCircle, Hourglass, Database,
-  Box, FileJson, FileSpreadsheet, Target, FolderPlus, GripVertical,
-  Trash2, RefreshCw, TrendingUp
-} from "lucide-react";
-import { 
-  getMasterTestCases, updateTestCase, uploadMasterTestCases, moveModule, deleteTestCase, getAutomationTrend 
-} from "@/lib/actions";
+import { Edit3, Save, X, Loader2, CheckCircle2, AlertCircle, Folder, Zap, ChevronDown, ChevronRight, Upload,Hash, Type, Filter, Server, Command, MousePointerClick, PlayCircle, Hourglass, Database,Box, FileJson, FileSpreadsheet, Target, FolderPlus, GripVertical,Trash2, RefreshCw, TrendingUp} from "lucide-react";
+import { getTestCasesByProject, updateTestCase, uploadMasterTestCases, moveModule, deleteTestCase, getAutomationTrend, importTestCases } from "@/lib/actions";
 import { cn } from "@/lib/utils";
+import { useParams } from "next/navigation";
 
 /* --- 1. TREE BUILDER HELPER --- */
 const buildTree = (cases: any[]) => {
@@ -167,6 +153,7 @@ function SortableFolder({
 
 /* --- 3. MAIN COMPONENT --- */
 export default function TestCaseManager() {
+  const { projectId } = useParams();
   const [masterCases, setMasterCases] = useState<any[]>([]);
   const [trendData, setTrendData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -183,7 +170,7 @@ export default function TestCaseManager() {
 
   const loadData = async () => {
     try {
-      const [data, trend] = await Promise.all([getMasterTestCases(), getAutomationTrend()]);
+      const [data, trend] = await Promise.all([getTestCasesByProject(Number(projectId)), getAutomationTrend()]);
       setMasterCases(data);
       setTrendData(trend);
     } finally { setLoading(false); }
@@ -270,7 +257,7 @@ export default function TestCaseManager() {
           const wb = XLSX.read(bstr, { type: 'binary' });
           rawData = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
         }
-        const res = await uploadMasterTestCases(rawData);
+        const res = await importTestCases(Number(projectId),rawData);
         if (res.success) { await loadData(); setStatus({ type: 'success', msg: "IMPORT_SUCCESS" }); }
       } catch (err) { setStatus({ type: 'error', msg: "IMPORT_FAILED" }); }
       finally { setLoading(false); }

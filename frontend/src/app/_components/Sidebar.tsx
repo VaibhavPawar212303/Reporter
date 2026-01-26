@@ -23,9 +23,9 @@ export default function Sidebar() {
       <nav className="p-5 space-y-1 flex-1 overflow-y-auto custom-scrollbar">
         <NavItem href="/dashboard" icon={<LayoutDashboard />} label="Executive Overview" active={pathname === "/dashboard"} />
         <NavItem href="/projects" icon={<FilePlusIcon />} label="Project" active={pathname.startsWith("/project")} />
-        <NavItem href="/playwright" icon={<Cpu />} label="Playwright Instance" active={pathname.startsWith("/playwright")} />
-        <NavItem href="/cypress" icon={<PlayCircle />} label="Cypress Instance" active={pathname.startsWith("/cypress")} />
-        <NavItem href="/test-cases" icon={<Database />} label="TestCase Manager" active={pathname === "/test-cases"} />
+        {/* <NavItem href="/playwright" icon={<Cpu />} label="Playwright Instance" active={pathname.startsWith("/playwright")} /> */}
+        {/* <NavItem href="/cypress" icon={<PlayCircle />} label="Cypress Instance" active={pathname.startsWith("/cypress")} /> */}
+        {/* <NavItem href="/test-cases" icon={<Database />} label="TestCase Manager" active={pathname === "/test-cases"} /> */}
       </nav>
     </aside>
   );
