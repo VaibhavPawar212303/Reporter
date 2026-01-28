@@ -7,22 +7,63 @@ import { db } from '../../db';
 import { auth } from '@clerk/nextjs/server';
 
 
-
+// this is fixed 
 export async function getDashboardStats() {
-  const builds = await db.select().from(automationBuilds).orderBy(desc(automationBuilds.id)).limit(50);
-  const totalRequirements = await db.select({ count: sql<number>`count(*)` }).from(testCases);
+  try {
+    // 1. Authenticate the user session
+    const { userId } = await auth();
+    if (!userId) {
+      return { error: "Unauthorized access detected." };
+    }
 
-  // Fetch results for these specific builds only to save RUs
-  const buildIds = builds.map(b => b.id);
-  const results = buildIds.length > 0
-    ? await db.select().from(testResults).where(inArray(testResults.buildId, buildIds))
-    : [];
+    // 2. Resolve the user's Organization ID from the membership registry
+    const membership = await db.query.organizationMembers.findFirst({
+      where: eq(organizationMembers.userId, userId),
+    });
 
-  return {
-    builds,
-    results, // These are the rows containing the JSON 'tests' column
-    totalRequirements: totalRequirements[0]?.count || 0
-  };
+    if (!membership) {
+      return { error: "Security Protocol: No organization link found for this user." };
+    }
+
+    const orgId = membership.organizationId;
+
+    // 3. Fetch Builds scoped to this organization only
+    const builds = await db.select()
+      .from(automationBuilds)
+      .where(eq(automationBuilds.organizationId, orgId))
+      .orderBy(desc(automationBuilds.id))
+      .limit(50);
+
+    // 4. Fetch Requirement Count scoped to this organization
+    const totalRequirementsCount = await db.select({ count: sql<number>`count(*)` })
+      .from(testCases)
+      .where(eq(testCases.organizationId, orgId));
+
+    // 5. Fetch Results for these builds (ensuring org isolation)
+    const buildIds = builds.map(b => b.id);
+    const results = buildIds.length > 0
+      ? await db.select()
+          .from(testResults)
+          .where(
+            and(
+              inArray(testResults.buildId, buildIds),
+              eq(testResults.organizationId, orgId) // Critical: Data Isolation
+            )
+          )
+      : [];
+
+    // Return the telemetry package
+    return {
+      builds,
+      results,
+      totalRequirements: totalRequirementsCount[0]?.count || 0,
+      organizationId: orgId
+    };
+
+  } catch (error: any) {
+    console.error("🔍 [TELEMETRY_FAILURE]:", error.message);
+    return { error: "System Error: Failed to retrieve industrial analytics." };
+  }
 }
 export async function getBuildHistory() {
   return await db.select({
@@ -33,6 +74,65 @@ export async function getBuildHistory() {
     type: automationBuilds.type
   }).from(automationBuilds).orderBy(desc(automationBuilds.id)).limit(30);
 }
+export async function getProjectBuildHistory(projectId: number) {
+  try {
+    // 1. Authenticate the Operator
+    const { userId } = await auth();
+    if (!userId) return { error: "AUTH_REQUIRED" };
+
+    // 2. Resolve Organization Context
+    const membership = await db.query.organizationMembers.findFirst({
+      where: eq(organizationMembers.userId, userId),
+    });
+
+    if (!membership) return { error: "ORG_NOT_FOUND" };
+    const orgId = membership.organizationId;
+
+    // 3. Security Check: Verify Project belongs to User's Org
+    const projectCheck = await db.query.projects.findFirst({
+      where: and(
+        eq(projects.id, projectId),
+        eq(projects.organizationId, orgId)
+      )
+    });
+
+    if (!projectCheck) return { error: "ACCESS_DENIED_OR_INVALID_PROJECT" };
+
+    // 4. Fetch Builds with Triggering User metadata
+    // We join with the users table to show who started the build
+    const builds = await db.select({
+      id: automationBuilds.id,
+      status: automationBuilds.status,
+      environment: automationBuilds.environment,
+      type: automationBuilds.type,
+      createdAt: automationBuilds.createdAt,
+      triggeredBy: {
+        name: users.firstName,
+        image: users.imageUrl
+      }
+    })
+    .from(automationBuilds)
+    .leftJoin(users, eq(automationBuilds.triggeredById, users.id))
+    .where(
+      and(
+        eq(automationBuilds.projectId, projectId),
+        eq(automationBuilds.organizationId, orgId)
+      )
+    )
+    .orderBy(desc(automationBuilds.createdAt));
+
+    return { 
+      success: true, 
+      builds,
+      projectName: projectCheck.name 
+    };
+
+  } catch (error: any) {
+    console.error("🔍 [REGISTRY_FETCH_FAILURE]:", error.message);
+    return { error: "SYSTEM_RESOURCES_UNAVAILABLE" };
+  }
+}
+
 
 export async function uploadMasterTestCases(data: any[], projectId: number) {
   try {
@@ -787,9 +887,6 @@ export async function getBuildsByProjectAndType(projectId: number, type: string)
 }
 
 
-
-
-
 export async function getTestCasesByProject(projectId: number) {
   return await db.select()
     .from(testCases)
@@ -907,6 +1004,7 @@ export async function getProjectManualStats(projectId: number) {
   };
 }
 
+// this is fixed 
 const forceSlice = (val: any, limit: number, fallback: string | null = null) => {
   if (val === undefined || val === null || val === "" || val === "-") return fallback;
   return String(val).trim().slice(0, limit);
