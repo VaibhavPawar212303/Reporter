@@ -609,25 +609,45 @@ export async function createProject(formData: {
   }
 }
 export async function getProjects() {
+  const { userId } = await auth();
+
+  if (!userId) {
+    return [];
+  }
+
+  // Get user's organization
+  const membership = await db.query.organizationMembers.findFirst({
+    where: eq(organizationMembers.userId, userId),
+  });
+
+  if (!membership) {
+    return [];
+  }
+
+  // Fetch projects for the user's organization
   const result = await db.select({
     id: projects.id,
     name: projects.name,
     type: projects.type,
     environment: projects.environment,
+    description: projects.description,
+    organizationId: projects.organizationId,
+    createdAt: projects.createdAt,
     // Count builds linked to this project
-    executionCount: sql<number>`(SELECT COUNT(*) FROM ${automationBuilds} WHERE ${automationBuilds.projectId} = ${projects.id})`,
+    executionCount: sql<number>`(SELECT COUNT(*) FROM automation_builds WHERE automation_builds.project_id = ${projects.id})`,
     // Count test cases linked to this project
-    totalCases: sql<number>`(SELECT COUNT(*) FROM ${testCases} WHERE ${testCases.projectId} = ${projects.id})`,
-  }).from(projects);
+    totalCases: sql<number>`(SELECT COUNT(*) FROM test_cases WHERE test_cases.project_id = ${projects.id})`,
+  })
+  .from(projects)
+  .where(eq(projects.organizationId, membership.organizationId));
 
-  // Map to add UI colors based on the image provided
-  const colors = ["indigo", "amber", "emerald"];
+  // Map to add UI colors
+  const colors = ['indigo', 'amber', 'emerald', 'rose', 'cyan', 'violet'];
 
   return result.map((p, index) => ({
     ...p,
     color: colors[index % colors.length],
-    // Coverage logic placeholder: (Actual results logic can be added later)
-    coverage: p.totalCases > 0 ? "100%" : "0%"
+    coverage: p.totalCases > 0 ? '100%' : '0%',
   }));
 }
 export async function getProjectById(id: number) {
