@@ -6,7 +6,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAx
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Edit3, Save, X, Loader2, CheckCircle2, AlertCircle, Folder, Zap, ChevronDown, ChevronRight, Upload, Hash, Type, Filter, Server, Command, MousePointerClick, PlayCircle, Hourglass, Database, Box, FileJson, FileSpreadsheet, Target, FolderPlus, GripVertical, Trash2, RefreshCw, TrendingUp } from "lucide-react";
+import { Edit3, Save, X, Loader2, CheckCircle2, AlertCircle, Folder, Zap, ChevronDown, ChevronRight, Upload,Hash, Type, Filter, Server, Command, MousePointerClick, PlayCircle, Hourglass, Database,Box, FileJson, FileSpreadsheet, Target, FolderPlus, GripVertical,Trash2, RefreshCw, TrendingUp} from "lucide-react";
 import { getTestCasesByProject, updateTestCase, uploadMasterTestCases, moveModule, deleteTestCase, getAutomationTrend, importTestCases } from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { useParams } from "next/navigation";
@@ -15,7 +15,10 @@ import { useParams } from "next/navigation";
 const buildTree = (cases: any[]) => {
   const tree: any = {};
   cases.forEach(tc => {
-    const parts = (tc.moduleName || "UNGROUPED").split(" / ");
+    // FIX: Check for both moduleName and module_name (database vs drizzle mapping)
+    const rawModule = tc.moduleName || tc.module_name || "UNGROUPED";
+    const parts = rawModule.split(" / ");
+    
     let current = tree;
     parts.forEach((part: string, index: number) => {
       if (!current[part]) {
@@ -29,12 +32,11 @@ const buildTree = (cases: any[]) => {
   });
   return tree;
 };
-
 /* --- 2. SORTABLE FOLDER COMPONENT --- */
-function SortableFolder({
-  name, node, onToggle, expandedModules, expandedId, setExpandedId,
-  onSave, onCancel, editingId, setEditingId, editForm, setEditForm,
-  onDelete, renderIndexedContent
+function SortableFolder({ 
+  name, node, onToggle, expandedModules, expandedId, setExpandedId, 
+  onSave, onCancel, editingId, setEditingId, editForm, setEditForm, 
+  onDelete, renderIndexedContent 
 }: any) {
   const isExpanded = expandedModules.includes(node._path);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: node._path });
@@ -61,16 +63,16 @@ function SortableFolder({
         </div>
 
         <div className="flex items-center gap-3 font-mono">
-          <div className="flex items-center bg-black/40 border border-zinc-800 rounded-sm px-3 py-1 gap-4">
-            <div className="flex flex-col items-center pr-3 border-r border-zinc-800">
-              <span className="text-[10px] font-bold text-emerald-500 leading-none">{auto}</span>
-              <span className="text-[6px] text-zinc-600 font-black uppercase tracking-tighter mt-0.5">Auto</span>
+            <div className="flex items-center bg-black/40 border border-zinc-800 rounded-sm px-3 py-1 gap-4">
+                <div className="flex flex-col items-center pr-3 border-r border-zinc-800">
+                    <span className="text-[10px] font-bold text-emerald-500 leading-none">{auto}</span>
+                    <span className="text-[6px] text-zinc-600 font-black uppercase tracking-tighter mt-0.5">Auto</span>
+                </div>
+                <div className="flex flex-col items-center">
+                    <span className="text-[10px] font-bold text-indigo-400 leading-none">{manual}</span>
+                    <span className="text-[6px] text-zinc-600 font-black uppercase tracking-tighter mt-0.5">Man</span>
+                </div>
             </div>
-            <div className="flex flex-col items-center">
-              <span className="text-[10px] font-bold text-indigo-400 leading-none">{manual}</span>
-              <span className="text-[6px] text-zinc-600 font-black uppercase tracking-tighter mt-0.5">Man</span>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -78,71 +80,71 @@ function SortableFolder({
         <div className="ml-9 mt-2 border-l border-zinc-800/50 pl-4 space-y-2">
           {Object.entries(node).map(([key, value]: [string, any]) => {
             if (key.startsWith('_')) return null;
-            return <SortableFolder key={key} name={key} node={value} {...{ onToggle, expandedModules, expandedId, setExpandedId, onSave, onCancel, editingId, setEditingId, editForm, setEditForm, onDelete, renderIndexedContent }} />;
+            return <SortableFolder key={key} name={key} node={value} {...{onToggle, expandedModules, expandedId, setExpandedId, onSave, onCancel, editingId, setEditingId, editForm, setEditForm, onDelete, renderIndexedContent}} />;
           })}
-
+          
           {node._items.length > 0 && (
             <div className="bg-zinc-950/20 rounded-sm border border-zinc-800/50 divide-y divide-zinc-800/50 overflow-hidden">
-              {node._items.map((tc: any) => (
-                <Fragment key={tc.id}>
-                  <div
-                    onClick={() => !editingId && setExpandedId(expandedId === tc.id ? null : tc.id)}
-                    className={cn("p-4 hover:bg-white/[0.02] cursor-pointer flex items-center justify-between group/row transition-all", editingId === tc.id && "bg-indigo-500/5 border-y border-indigo-500/20")}
-                  >
-                    <div className="flex items-center gap-6 flex-1 min-w-0">
-                      <div className="w-24 shrink-0">
-                        {editingId === tc.id ? (
-                          <input className="bg-zinc-950 border border-zinc-700 rounded-sm px-2 py-1 text-indigo-400 w-full outline-none font-mono text-[10px] focus:border-indigo-500" value={editForm.caseCode} onClick={e => e.stopPropagation()} onChange={e => setEditForm({ ...editForm, caseCode: e.target.value })} />
-                        ) : (<span className="text-[10px] font-mono text-indigo-400 font-bold">{tc.caseCode}</span>)}
-                      </div>
-                      <div className="flex-1 min-w-0 pr-4">
-                        {editingId === tc.id ? (
-                          <input className="bg-zinc-950 border border-zinc-700 rounded-sm px-3 py-1 text-xs text-white outline-none w-full focus:border-indigo-500" value={editForm.title} onClick={e => e.stopPropagation()} onChange={e => setEditForm({ ...editForm, title: e.target.value })} />
-                        ) : (
-                          <span className="text-[11px] font-bold text-zinc-300 uppercase tracking-tight truncate block">{tc.title}</span>
-                        )}
-                      </div>
-                    </div>
+               {node._items.map((tc: any) => (
+                  <Fragment key={tc.id}>
+                    <div 
+                      onClick={() => !editingId && setExpandedId(expandedId === tc.id ? null : tc.id)} 
+                      className={cn("p-4 hover:bg-white/[0.02] cursor-pointer flex items-center justify-between group/row transition-all", editingId === tc.id && "bg-indigo-500/5 border-y border-indigo-500/20")}
+                    >
+                        <div className="flex items-center gap-6 flex-1 min-w-0">
+                          <div className="w-24 shrink-0">
+                            {editingId === tc.id ? (
+                                <input className="bg-zinc-950 border border-zinc-700 rounded-sm px-2 py-1 text-indigo-400 w-full outline-none font-mono text-[10px] focus:border-indigo-500" value={editForm.caseCode} onClick={e => e.stopPropagation()} onChange={e => setEditForm({...editForm, caseCode: e.target.value})} />
+                            ) : ( <span className="text-[10px] font-mono text-indigo-400 font-bold">{tc.caseCode}</span> )}
+                          </div>
+                          <div className="flex-1 min-w-0 pr-4">
+                            {editingId === tc.id ? (
+                                <input className="bg-zinc-950 border border-zinc-700 rounded-sm px-3 py-1 text-xs text-white outline-none w-full focus:border-indigo-500" value={editForm.title} onClick={e => e.stopPropagation()} onChange={e => setEditForm({...editForm, title: e.target.value})} />
+                            ) : (
+                                <span className="text-[11px] font-bold text-zinc-300 uppercase tracking-tight truncate block">{tc.title}</span>
+                            )}
+                          </div>
+                        </div>
 
-                    <div className="flex items-center gap-6 shrink-0">
-                      <div className="w-24">
-                        {editingId === tc.id ? (
-                          <select className="bg-zinc-950 border border-zinc-700 rounded-sm px-2 py-1 text-[9px] font-black uppercase outline-none w-full text-zinc-400" value={editForm.mode} onClick={e => e.stopPropagation()} onChange={e => setEditForm({ ...editForm, mode: e.target.value })}>
-                            <option value="Automation">Automation</option>
-                            <option value="Manual">Manual</option>
-                          </select>
-                        ) : (<span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest">{tc.mode}</span>)}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {editingId === tc.id ? (
-                          <div className="flex gap-1">
-                            <button onClick={(e) => { e.stopPropagation(); onSave(); }} className="p-1.5 bg-emerald-600 text-white rounded-sm hover:bg-emerald-500"><Save size={12} /></button>
-                            <button onClick={(e) => { e.stopPropagation(); onCancel(); }} className="p-1.5 bg-zinc-800 text-zinc-400 rounded-sm"><X size={12} /></button>
+                        <div className="flex items-center gap-6 shrink-0">
+                          <div className="w-24">
+                            {editingId === tc.id ? (
+                                <select className="bg-zinc-950 border border-zinc-700 rounded-sm px-2 py-1 text-[9px] font-black uppercase outline-none w-full text-zinc-400" value={editForm.mode} onClick={e => e.stopPropagation()} onChange={e => setEditForm({...editForm, mode: e.target.value})}>
+                                    <option value="Automation">Automation</option>
+                                    <option value="Manual">Manual</option>
+                                </select>
+                            ) : ( <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest">{tc.mode}</span> )}
                           </div>
-                        ) : (
-                          <div className="flex gap-1">
-                            <button onClick={(e) => { e.stopPropagation(); setEditingId(tc.id); setEditForm({ ...tc }); setExpandedId(tc.id); }} className="p-1.5 text-zinc-700 hover:text-indigo-400 opacity-0 group-hover/row:opacity-100 transition-all"><Edit3 size={14} /></button>
-                            <button onClick={(e) => onDelete(e, tc.id)} className="p-1.5 text-zinc-700 hover:text-rose-500 opacity-0 group-hover/row:opacity-100 transition-all"><Trash2 size={14} /></button>
-                            <ChevronDown size={14} className={cn("text-zinc-800 transition-transform", expandedId === tc.id && "rotate-180 text-indigo-500")} />
+                          <div className="flex items-center gap-2">
+                             {editingId === tc.id ? (
+                                <div className="flex gap-1">
+                                  <button onClick={(e) => { e.stopPropagation(); onSave(); }} className="p-1.5 bg-emerald-600 text-white rounded-sm hover:bg-emerald-500"><Save size={12}/></button>
+                                  <button onClick={(e) => { e.stopPropagation(); onCancel(); }} className="p-1.5 bg-zinc-800 text-zinc-400 rounded-sm"><X size={12}/></button>
+                                </div>
+                             ) : (
+                                <div className="flex gap-1">
+                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(tc.id); setEditForm({...tc}); setExpandedId(tc.id); }} className="p-1.5 text-zinc-700 hover:text-indigo-400 opacity-0 group-hover/row:opacity-100 transition-all"><Edit3 size={14}/></button>
+                                  <button onClick={(e) => onDelete(e, tc.id)} className="p-1.5 text-zinc-700 hover:text-rose-500 opacity-0 group-hover/row:opacity-100 transition-all"><Trash2 size={14}/></button>
+                                  <ChevronDown size={14} className={cn("text-zinc-800 transition-transform", expandedId === tc.id && "rotate-180 text-indigo-500")} />
+                                </div>
+                             )}
                           </div>
-                        )}
-                      </div>
+                        </div>
                     </div>
-                  </div>
-                  {expandedId === tc.id && (
-                    <div className="p-10 bg-zinc-900/30 border-l-2 border-indigo-500/50 grid grid-cols-2 gap-10">
-                      <div className="space-y-4">
-                        <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2"><Command size={10} /> Instruction_Set</p>
-                        {editingId === tc.id ? <textarea className="w-full bg-black border border-zinc-800 rounded-sm p-4 font-mono text-[11px] h-48 outline-none text-zinc-400 focus:border-indigo-500 rounded-sm" value={editForm.steps} onChange={e => setEditForm({ ...editForm, steps: e.target.value })} /> : <div className="p-5 bg-zinc-950 rounded-sm border border-zinc-800 min-h-[12rem]">{renderIndexedContent(tc.steps, "text-indigo-500")}</div>}
+                    {expandedId === tc.id && (
+                      <div className="p-10 bg-zinc-900/30 border-l-2 border-indigo-500/50 grid grid-cols-2 gap-10">
+                          <div className="space-y-4">
+                              <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2"><Command size={10}/> Instruction_Set</p>
+                              {editingId === tc.id ? <textarea className="w-full bg-black border border-zinc-800 rounded-sm p-4 font-mono text-[11px] h-48 outline-none text-zinc-400 focus:border-indigo-500 rounded-sm" value={editForm.steps} onChange={e => setEditForm({...editForm, steps: e.target.value})} /> : <div className="p-5 bg-zinc-950 rounded-sm border border-zinc-800 min-h-[12rem]">{renderIndexedContent(tc.steps, "text-indigo-500")}</div>}
+                          </div>
+                          <div className="space-y-4">
+                              <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2"><Zap size={10}/> Expected_Outcome</p>
+                              {editingId === tc.id ? <textarea className="w-full bg-black border border-zinc-800 rounded-sm p-4 font-mono text-[11px] h-48 outline-none text-zinc-400 focus:border-indigo-500 rounded-sm" value={editForm.expectedResult} onChange={e => setEditForm({...editForm, expectedResult: e.target.value})} /> : <div className="p-5 bg-zinc-950 rounded-sm border border-zinc-800 min-h-[12rem]">{renderIndexedContent(tc.expectedResult, "text-emerald-500")}</div>}
+                          </div>
                       </div>
-                      <div className="space-y-4">
-                        <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2"><Zap size={10} /> Expected_Outcome</p>
-                        {editingId === tc.id ? <textarea className="w-full bg-black border border-zinc-800 rounded-sm p-4 font-mono text-[11px] h-48 outline-none text-zinc-400 focus:border-indigo-500 rounded-sm" value={editForm.expectedResult} onChange={e => setEditForm({ ...editForm, expectedResult: e.target.value })} /> : <div className="p-5 bg-zinc-950 rounded-sm border border-zinc-800 min-h-[12rem]">{renderIndexedContent(tc.expectedResult, "text-emerald-500")}</div>}
-                      </div>
-                    </div>
-                  )}
-                </Fragment>
-              ))}
+                    )}
+                  </Fragment>
+               ))}
             </div>
           )}
         </div>
@@ -150,7 +152,6 @@ function SortableFolder({
     </div>
   );
 }
-
 /* --- 3. MAIN COMPONENT --- */
 export default function TestCaseManager() {
   const { projectId } = useParams();
@@ -168,38 +169,36 @@ export default function TestCaseManager() {
   const [editForm, setEditForm] = useState<any>(null);
   const [status, setStatus] = useState<{ type: 'success' | 'error' | null, msg: string }>({ type: null, msg: "" });
 
-  // Parse projectId safely
-  const parsedProjectId = useMemo(() => {
-    if (!projectId) return null;
-    const id = Array.isArray(projectId) ? projectId[0] : projectId;
-    return Number(id);
-  }, [projectId]);
-
   const loadData = async () => {
-    if (!parsedProjectId) return;
+    if (!projectId) return; // Logic fix: prevent fetching without ID
     try {
+      setLoading(true);
       const [data, trend] = await Promise.all([
-        getTestCasesByProject(parsedProjectId),
+        getTestCasesByProject(Number(projectId)), // Logic fix: scoped to Project
         getAutomationTrend()
       ]);
       setMasterCases(data);
       setTrendData(trend);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    if (parsedProjectId) {
-      loadData();
-    }
-  }, [parsedProjectId]);
+  useEffect(() => { loadData(); }, [projectId]);
+
+  // Logic Fix: Filtered list for the UI Tree and Search
+  const filteredCases = useMemo(() => {
+    return masterCases.filter(tc => {
+      const matchId = !idFilter || tc.caseCode?.toLowerCase().includes(idFilter.toLowerCase());
+      const matchTitle = !titleFilter || tc.title?.toLowerCase().includes(titleFilter.toLowerCase());
+      const matchModule = moduleFilter === "all" || tc.moduleName === moduleFilter;
+      return matchId && matchTitle && matchModule;
+    });
+  }, [masterCases, idFilter, titleFilter, moduleFilter]);
 
   const metrics = useMemo(() => {
     const total = masterCases.length;
     const automated = masterCases.filter(c => c.mode?.toLowerCase() === 'automation').length;
     const manual = masterCases.filter(c => c.mode?.toLowerCase() === 'manual').length;
-    return { total, automated, manual, pending: total - (automated + manual), rate: total > 0 ? Math.round((automated / total) * 100) : 0 };
+    return { total, automated, manual, pending: total - (automated + manual), rate: total > 0 ? Math.round((automated/total)*100) : 0 };
   }, [masterCases]);
 
   const pieData = useMemo(() => [
@@ -208,7 +207,7 @@ export default function TestCaseManager() {
     { name: 'BACKLOG', value: metrics.pending, color: '#3f3f46' },
   ].filter(d => d.value > 0), [metrics]);
 
-  const tree = useMemo(() => buildTree(masterCases), [masterCases]);
+  const tree = useMemo(() => buildTree(filteredCases), [filteredCases]); // Logic fix: Build tree from filtered data
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   const handleDragEnd = async (event: any) => {
@@ -225,32 +224,33 @@ export default function TestCaseManager() {
   };
 
   const handleCreateModule = async () => {
-    if (!newModuleName || !parsedProjectId) return;
+    if (!newModuleName.trim() || !projectId) return;
     setLoading(true);
-    const res = await uploadMasterTestCases([{
-      caseCode: `MOD-${Date.now().toString().slice(-4)}`,
-      title: "INITIALIZER",
-      ModuleName: newModuleName,
-      Mode: "Manual",
-      Priority: "low"
-    }], parsedProjectId);
-    if (res.success) {
-      setNewModuleName("");
-      setIsAddingModule(false);
-      await loadData();
+    
+    const res = await uploadMasterTestCases([{ 
+        projectId: Number(projectId),
+        caseCode: `MOD-${Date.now().toString().slice(-4)}`, 
+        title: "INITIALIZER", 
+        // FIX: Provide all variants to satisfy the Server Action's logic
+        moduleName: newModuleName.trim(), 
+        "Module Name": newModuleName.trim(), 
+        ModuleName: newModuleName.trim(),
+        mode: "Manual", 
+        priority: "low" 
+    }], Number(projectId));
+  
+    if (res.success) { 
+      setNewModuleName(""); 
+      setIsAddingModule(false); 
+      await loadData(); 
     }
     setLoading(false);
   };
 
   const handleSave = async () => {
-    if (!editingId) return;
     setLoading(true);
-    const res = await updateTestCase(editingId, editForm);
-    if (res.success) {
-      setEditingId(null);
-      await loadData();
-      setStatus({ type: 'success', msg: "COMMIT_SUCCESS" });
-    }
+    const res = await updateTestCase(editingId!, editForm);
+    if (res.success) { setEditingId(null); await loadData(); setStatus({ type: 'success', msg: "COMMIT_SUCCESS" }); }
     setLoading(false);
   };
 
@@ -266,7 +266,7 @@ export default function TestCaseManager() {
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !parsedProjectId) return;
+    if (!file || !projectId) return;
     setLoading(true);
     const reader = new FileReader();
     const fileName = file.name.toLowerCase();
@@ -277,23 +277,16 @@ export default function TestCaseManager() {
         else if (fileName.endsWith('.csv')) {
           const csv = Papa.parse(evt.target?.result as string, { header: true, skipEmptyLines: true });
           rawData = csv.data;
-        }
+        } 
         else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
           const bstr = evt.target?.result;
           const wb = XLSX.read(bstr, { type: 'binary' });
           rawData = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
         }
-        const res = await importTestCases(parsedProjectId, rawData);
-        if (res.success) {
-          await loadData();
-          setStatus({ type: 'success', msg: "IMPORT_SUCCESS" });
-        }
-      } catch (err) {
-        setStatus({ type: 'error', msg: "IMPORT_FAILED" });
-      }
-      finally {
-        setLoading(false);
-      }
+        const res = await importTestCases(Number(projectId), rawData); // Logic fix: Scoped import
+        if (res.success) { await loadData(); setStatus({ type: 'success', msg: "IMPORT_SUCCESS" }); }
+      } catch (err) { setStatus({ type: 'error', msg: "IMPORT_FAILED" }); }
+      finally { setLoading(false); }
     };
     if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) reader.readAsBinaryString(file);
     else reader.readAsText(file);
@@ -309,96 +302,87 @@ export default function TestCaseManager() {
     ));
   };
 
-  // Show loading if no projectId
-  if (!parsedProjectId) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-[#0c0c0e]">
-        <Loader2 className="animate-spin text-indigo-500" size={32} />
-      </div>
-    );
-  }
-
   return (
-    <div className="p-8 space-y-8 bg-[#0c0c0e] h-screen overflow-y-auto custom-scrollbar text-zinc-300 font-sans">
-
-      {/* HEADER */}
+    <div className="p-8 space-y-8 bg-[#0c0c0e] h-screen overflow-y-auto custom-scrollbar text-zinc-300 font-sans selection:bg-indigo-500/30">
+      
+      {/* HEADER (Maintained) */}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-zinc-800 pb-8 uppercase">
         <div>
-          <div className="flex items-center gap-2 text-zinc-500 mb-2 font-mono text-[10px] tracking-widest"><Server size={12} /> Registry / Infrastructure</div>
+          <div className="flex items-center gap-2 text-zinc-500 mb-2 font-mono text-[10px] tracking-widest"><Server size={12} /> Registry / Instance_{projectId}</div>
           <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3"><Database size={28} className="text-indigo-500" />Requirement Tree</h1>
         </div>
         <div className="flex gap-3">
-          <button onClick={() => setIsAddingModule(!isAddingModule)} className="bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black px-4 py-3 rounded-sm tracking-widest flex items-center gap-2 transition-all shadow-lg shadow-indigo-500/10"><FolderPlus size={14} /> New_Module</button>
-          <div className={cn("bg-[#111114] border border-zinc-800 rounded-sm p-3 flex items-center gap-4 shadow-sm transition-all", loading ? "opacity-50" : "hover:bg-zinc-900")}>
-            <label className="cursor-pointer group flex items-center gap-3">
-              <div className="p-2 bg-zinc-950 rounded-sm border border-zinc-800">{loading ? <RefreshCw size={14} className="text-indigo-500 animate-spin" /> : <Upload size={14} className="text-zinc-500" />}</div>
-              <div className="flex flex-col"><span className="text-[10px] font-black text-white tracking-widest">{loading ? "UPLOADING..." : "Sync_Metadata"}</span>{!loading && <span className="text-[8px] text-zinc-600 font-mono font-bold uppercase tracking-tighter">JSON_CSV_XLSX</span>}</div>
-              <input type="file" className="hidden" accept=".json, .csv, .xlsx, .xls" onChange={handleImport} disabled={loading} />
-            </label>
-          </div>
-          <div className="bg-zinc-900 border border-zinc-800 px-4 py-2 rounded-sm font-mono text-lg font-bold">{masterCases.length} <span className="text-[10px] text-zinc-600 tracking-widest">Objects</span></div>
+            <button onClick={() => setIsAddingModule(!isAddingModule)} className="bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black px-4 py-3 rounded-sm tracking-widest flex items-center gap-2 transition-all shadow-lg shadow-indigo-500/10"><FolderPlus size={14} /> New_Module</button>
+            <div className={cn("bg-[#111114] border border-zinc-800 rounded-sm p-3 flex items-center gap-4 shadow-sm transition-all", loading ? "opacity-50" : "hover:bg-zinc-900")}>
+                <label className="cursor-pointer group flex items-center gap-3">
+                    <div className="p-2 bg-zinc-950 rounded-sm border border-zinc-800">{loading ? <RefreshCw size={14} className="text-indigo-500 animate-spin" /> : <Upload size={14} className="text-zinc-500" />}</div>
+                    <div className="flex flex-col"><span className="text-[10px] font-black text-white tracking-widest">{loading ? "UPLOADING..." : "Sync_Metadata"}</span>{!loading && <span className="text-[8px] text-zinc-600 font-mono font-bold uppercase tracking-tighter">JSON_CSV_XLSX</span>}</div>
+                    <input type="file" className="hidden" accept=".json, .csv, .xlsx, .xls" onChange={handleImport} disabled={loading} />
+                </label>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 px-4 py-2 rounded-sm font-mono text-lg font-bold">{masterCases.length} <span className="text-[10px] text-zinc-600 tracking-widest">Objects</span></div>
         </div>
       </header>
 
       {isAddingModule && (
         <div className="bg-[#111114] border border-indigo-500/30 p-6 rounded-sm flex items-center gap-4 animate-in fade-in zoom-in-95 duration-200 uppercase">
-          <input autoFocus placeholder="NEW_PATH_IDENTIFIER..." className="bg-zinc-950 border border-zinc-800 rounded-sm px-4 py-3 text-xs font-mono text-white flex-1 outline-none" value={newModuleName} onChange={e => setNewModuleName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleCreateModule()} />
-          <button onClick={handleCreateModule} className="bg-indigo-600 px-6 py-3 text-[10px] font-black rounded-sm uppercase tracking-widest transition-colors hover:bg-indigo-500">Create_Object</button>
-          <button onClick={() => setIsAddingModule(false)} className="p-2 text-zinc-500 hover:text-white transition-colors"><X size={18} /></button>
+            <input autoFocus placeholder="NEW_PATH_IDENTIFIER..." className="bg-zinc-950 border border-zinc-800 rounded-sm px-4 py-3 text-xs font-mono text-white flex-1 outline-none" value={newModuleName} onChange={e => setNewModuleName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleCreateModule()} />
+            <button onClick={handleCreateModule} className="bg-indigo-600 px-6 py-3 text-[10px] font-black rounded-sm uppercase tracking-widest transition-colors hover:bg-indigo-500">Create_Object</button>
+            <button onClick={() => setIsAddingModule(false)} className="p-2 text-zinc-500 hover:text-white transition-colors"><X size={18}/></button>
         </div>
       )}
 
-      {/* CHARTS SECTION */}
+      {/* CHARTS SECTION (Maintained) */}
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
         <div className="xl:col-span-3 space-y-6 min-w-0">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 uppercase">
-            <StatCard title="Automation ROI" value={`${metrics.rate}%`} icon={<Target size={18} />} color="emerald" />
-            <StatCard title="Bot Ready" value={metrics.automated} icon={<PlayCircle size={18} />} color="indigo" />
-            <StatCard title="Manual_Ops" value={metrics.manual} icon={<MousePointerClick size={18} />} color="amber" />
-            <StatCard title="Registry" value={metrics.total} icon={<Box size={18} />} color="zinc" />
-          </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 uppercase">
+                <StatCard title="Automation ROI" value={`${metrics.rate}%`} icon={<Target size={18}/>} color="emerald" />
+                <StatCard title="Bot Ready" value={metrics.automated} icon={<PlayCircle size={18}/>} color="indigo" />
+                <StatCard title="Manual_Ops" value={metrics.manual} icon={<MousePointerClick size={18}/>} color="amber" />
+                <StatCard title="Registry" value={metrics.total} icon={<Box size={18}/>} color="zinc" />
+            </div>
         </div>
 
-        {/* PIE CHART */}
+        {/* PIE CHART (Maintained) */}
         <div className="bg-[#111114] border border-zinc-800 p-8 rounded-sm flex flex-col items-center justify-center relative overflow-hidden group h-[480px]">
-          <div className="absolute top-0 left-0 w-full h-1 bg-zinc-800" />
-          <div className="w-full flex-1 relative min-h-0 min-w-0">
-            <ResponsiveContainer width="99%" height="99%">
-              <PieChart>
-                <Pie data={pieData} innerRadius={65} outerRadius={90} paddingAngle={4} dataKey="value" stroke="none">
-                  {pieData.map((e, i) => <Cell key={i} fill={e.color} opacity={0.8} />)}
-                </Pie>
-                <Legend verticalAlign="bottom" iconType="circle" wrapperStyle={{ fontSize: '10px', textTransform: 'uppercase', fontWeight: 'bold', paddingTop: '20px' }} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none -mt-10">
-              <span className="text-3xl font-bold font-mono text-white tracking-tighter">{metrics.rate}%</span>
-              <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Automation</span>
+            <div className="absolute top-0 left-0 w-full h-1 bg-zinc-800" />
+            <div className="w-full flex-1 relative min-h-0 min-w-0">
+                <ResponsiveContainer width="99%" height="99%">
+                    <PieChart>
+                        <Pie data={pieData} innerRadius={65} outerRadius={90} paddingAngle={4} dataKey="value" stroke="none">
+                            {pieData.map((e, i) => <Cell key={i} fill={e.color} opacity={0.8} />)}
+                        </Pie>
+                        <Legend verticalAlign="bottom" iconType="circle" wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', fontWeight: 'bold', paddingTop: '20px'}} />
+                    </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none -mt-10">
+                    <span className="text-3xl font-bold font-mono text-white tracking-tighter">{metrics.rate}%</span>
+                    <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Automation</span>
+                </div>
             </div>
-          </div>
-          <span className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] mt-4 shrink-0">Library Distribution</span>
+            <span className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] mt-4 shrink-0">Library Distribution</span>
         </div>
       </div>
 
-      {/* FILTER PANEL */}
+      {/* FILTER PANEL (Maintained) */}
       <div className="bg-[#111114] border border-zinc-800 p-4 rounded-sm grid grid-cols-1 md:grid-cols-3 gap-4 shadow-sm uppercase">
         <div className="flex items-center px-4 gap-3 bg-zinc-950 border border-zinc-800 rounded-sm group focus-within:border-zinc-600 transition-colors">
           <Hash size={14} className="text-zinc-600" />
           <input placeholder="ID_SEARCH..." className="bg-transparent border-none focus:ring-0 w-full py-3 text-[11px] font-mono text-zinc-200" value={idFilter} onChange={e => setIdFilter(e.target.value)} />
         </div>
-        <div className="flex items-center px-4 gap-3 bg-zinc-950 border border-zinc-800 rounded-sm group focus-within:border-zinc-600 transition-colors">
+        <div className="flex items-center px-4 gap-3 bg-zinc-950 border border-zinc-800 rounded-sm group focus-within:border-zinc-600 transition-all transition-colors">
           <Type size={14} className="text-zinc-600" />
           <input placeholder="TITLE_MATCH..." className="bg-transparent border-none focus:ring-0 w-full py-3 text-[11px] font-mono text-zinc-200" value={titleFilter} onChange={e => setTitleFilter(e.target.value)} />
         </div>
         <div className="flex items-center px-4 gap-3 bg-zinc-950 border border-zinc-800 rounded-sm group focus-within:border-zinc-600 transition-colors">
           <Filter size={14} className="text-zinc-600" />
           <select className="bg-transparent border-none focus:ring-0 w-full py-3 text-[10px] font-black text-zinc-500 tracking-widest cursor-pointer" value={moduleFilter} onChange={e => setModuleFilter(e.target.value)}>
-            {["all", ...new Set(masterCases.map(c => c.moduleName).filter(Boolean))].map((m: string) => <option key={m} value={m} className="bg-[#0c0c0e]">{m === 'all' ? 'ALL_MODULES' : m.toUpperCase()}</option>)}
+             {["all", ...new Set(masterCases.map(c => c.moduleName).filter(Boolean))].map((m: string) => <option key={m} value={m} className="bg-[#0c0c0e]">{m === 'all' ? 'ALL_MODULES' : m.toUpperCase()}</option>)}
           </select>
         </div>
       </div>
 
-      {/* TREE EXPLORER */}
+      {/* TREE EXPLORER (Logic Fixed to use Filtered Data) */}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={Object.keys(tree)} strategy={verticalListSortingStrategy}>
           <div className="space-y-1">
@@ -413,7 +397,6 @@ export default function TestCaseManager() {
     </div>
   );
 }
-
 function StatCard({ title, value, icon, color }: any) {
   const accents: any = { indigo: 'border-t-indigo-500', emerald: 'border-t-emerald-500', amber: 'border-t-amber-500', zinc: 'border-t-zinc-600' };
   return (
