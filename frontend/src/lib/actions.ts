@@ -8,6 +8,32 @@ import { auth } from '@clerk/nextjs/server';
 
 
 
+export async function getDashboardStats() {
+  const builds = await db.select().from(automationBuilds).orderBy(desc(automationBuilds.id)).limit(50);
+  const totalRequirements = await db.select({ count: sql<number>`count(*)` }).from(testCases);
+
+  // Fetch results for these specific builds only to save RUs
+  const buildIds = builds.map(b => b.id);
+  const results = buildIds.length > 0
+    ? await db.select().from(testResults).where(inArray(testResults.buildId, buildIds))
+    : [];
+
+  return {
+    builds,
+    results, // These are the rows containing the JSON 'tests' column
+    totalRequirements: totalRequirements[0]?.count || 0
+  };
+}
+export async function getBuildHistory() {
+  return await db.select({
+    id: automationBuilds.id,
+    status: automationBuilds.status,
+    environment: automationBuilds.environment,
+    createdAt: automationBuilds.createdAt,
+    type: automationBuilds.type
+  }).from(automationBuilds).orderBy(desc(automationBuilds.id)).limit(30);
+}
+
 export async function uploadMasterTestCases(data: any[], projectId: number) {
   try {
     const { userId } = await auth();
@@ -119,114 +145,6 @@ export async function uploadMasterTestCases(data: any[], projectId: number) {
     return { error: e.message };
   }
 }
-
-// Alternative: Bulk insert with onDuplicateKeyUpdate (faster for large datasets)
-export async function uploadMasterTestCasesBulk(data: any[], projectId: number) {
-  try {
-    const { userId } = await auth();
-
-    if (!userId) {
-      return { error: 'Unauthorized' };
-    }
-
-    // Get user's organization
-    const membership = await db.query.organizationMembers.findFirst({
-      where: eq(organizationMembers.userId, userId),
-    });
-
-    if (!membership) {
-      return { error: 'No organization found' };
-    }
-
-    // Verify project belongs to user's organization
-    const project = await db.query.projects.findFirst({
-      where: and(
-        eq(projects.id, projectId),
-        eq(projects.organizationId, membership.organizationId)
-      ),
-    });
-
-    if (!project) {
-      return { error: 'Project not found or access denied' };
-    }
-
-    // Filter valid entries
-    const validEntries = data.filter((item) => {
-      const code = item['Case code'] || item.caseCode;
-      const title = item['Title'] || item.title;
-      return code && title;
-    });
-
-    // Process in batches of 100
-    const batchSize = 100;
-    let processed = 0;
-
-    for (let i = 0; i < validEntries.length; i += batchSize) {
-      const batch = validEntries.slice(i, i + batchSize);
-
-      await Promise.all(
-        batch.map((item) => {
-          const code = item['Case code'] || item.caseCode;
-          const title = item['Title'] || item.title;
-
-          return db
-            .insert(testCases)
-            .values({
-              projectId: projectId,
-              organizationId: membership.organizationId,
-              caseCode: String(code),
-              caseKey: String(item['Case API Key'] || item['Case Key'] || ''),
-              moduleName: String(item['ModuleName'] || item['Module Name'] || ''),
-              testSuite: String(item['Test Suite'] || ''),
-              title: String(title),
-              description: String(item['Description'] || ''),
-              precondition: String(item['Precondition'] || ''),
-              steps: String(item['Steps'] || ''),
-              expectedResult: String(item['ExpectedResult'] || ''),
-              type: String(item['Type'] || ''),
-              priority: String(item['Priorities'] || item.priority || 'medium'),
-              mode: String(item['Mode'] || 'Automation'),
-              createdById: userId,
-              tags: String(item['Tags'] || ''),
-            })
-            .onDuplicateKeyUpdate({
-              set: {
-                title: String(title),
-                moduleName: String(item['ModuleName'] || item['Module Name'] || ''),
-                testSuite: String(item['Test Suite'] || ''),
-                description: String(item['Description'] || ''),
-                precondition: String(item['Precondition'] || ''),
-                steps: String(item['Steps'] || ''),
-                expectedResult: String(item['ExpectedResult'] || ''),
-                type: String(item['Type'] || ''),
-                priority: String(item['Priorities'] || item.priority || 'medium'),
-                mode: String(item['Mode'] || 'Automation'),
-                tags: String(item['Tags'] || ''),
-              },
-            });
-        })
-      );
-
-      processed += batch.length;
-    }
-
-    revalidatePath('/test-cases');
-    revalidatePath('/');
-    revalidatePath(`/projects/${projectId}`);
-
-    return {
-      success: true,
-      stats: {
-        total: data.length,
-        processed,
-        skipped: data.length - validEntries.length,
-      },
-    };
-  } catch (e: any) {
-    console.error('❌ TiDB Insert Error:', e);
-    return { error: e.message };
-  }
-}
 export async function updateTestCase(id: number, data: any) {
   try {
     const { id: _, createdAt, updatedAt, ...updateData } = data;
@@ -246,31 +164,8 @@ export async function updateTestCase(id: number, data: any) {
   }
 }
 
-export async function getDashboardStats() {
-  const builds = await db.select().from(automationBuilds).orderBy(desc(automationBuilds.id)).limit(50);
-  const totalRequirements = await db.select({ count: sql<number>`count(*)` }).from(testCases);
 
-  // Fetch results for these specific builds only to save RUs
-  const buildIds = builds.map(b => b.id);
-  const results = buildIds.length > 0
-    ? await db.select().from(testResults).where(inArray(testResults.buildId, buildIds))
-    : [];
 
-  return {
-    builds,
-    results, // These are the rows containing the JSON 'tests' column
-    totalRequirements: totalRequirements[0]?.count || 0
-  };
-}
-export async function getBuildHistory() {
-  return await db.select({
-    id: automationBuilds.id,
-    status: automationBuilds.status,
-    environment: automationBuilds.environment,
-    createdAt: automationBuilds.createdAt,
-    type: automationBuilds.type
-  }).from(automationBuilds).orderBy(desc(automationBuilds.id)).limit(30);
-}
 
 
 export async function getPlaywrightTrend(projectId?: number) {
@@ -983,89 +878,6 @@ export async function createTestCase(data: {
     return { success: false, error: error.message };
   }
 }
-const forceSlice = (val: any, limit: number, fallback: string | null = null) => {
-  if (val === undefined || val === null || val === "" || val === "-") return fallback;
-  return String(val).trim().slice(0, limit);
-};
-export async function importTestCases(projectId: number, dataArray: any[]) {
-  try {
-    const formattedData = dataArray.map((item, index) => {
-      // Robust helper to find keys like "ExpectedResult", "Expected Result", or "expected_result"
-      const find = (key: string) => {
-        const normalizedSearch = key.toLowerCase().replace(/[\s_]/g, "");
-        const targetKey = Object.keys(item).find((actualKey) => {
-          return actualKey.toLowerCase().replace(/[\s_]/g, "") === normalizedSearch;
-        });
-        return targetKey ? item[targetKey] : undefined;
-      };
-
-      // Extract specific fields from your JSON
-      const rawExpected = find('expectedResult') || find('expected');
-      const rawPriority = find('priorities') || find('priority') || find('severity');
-      const rawLink = find('shareableTestCaseDetails') || find('shareableLink') || find('link');
-
-      return {
-        projectId: Number(projectId),
-
-        // Mapping based on your provided JSON structure
-        caseCode: forceSlice(find('caseCode') || find('id'), 100) || `TC-AUTO-${Date.now()}-${index}`,
-        caseKey: forceSlice(find('caseKey'), 100),
-        moduleName: forceSlice(find('moduleName') || find('module'), 100, 'GENERAL'),
-        testSuite: forceSlice(find('testSuite') || find('suite'), 100),
-        loggedUser: forceSlice(find('loggedUser') || find('user'), 100),
-
-        // Text Columns - Forcing ExpectedResult mapping
-        title: String(find('title') || 'Untitled Case'),
-        description: find('description') ? String(find('description')) : null,
-        precondition: find('precondition') ? String(find('precondition')) : null,
-        steps: find('steps') ? String(find('steps')) : null,
-
-        // SUCCESS: Mapped to 'ExpectedResult' from your JSON
-        expectedResult: rawExpected ? String(rawExpected) : null,
-
-        tags: find('tags') ? String(find('tags')) : null,
-        shareableLink: rawLink ? String(rawLink) : null,
-
-        type: forceSlice(find('type'), 50, 'manual'),
-        mode: forceSlice(find('mode'), 50, 'standard'),
-        priority: forceSlice(rawPriority, 20, 'medium'),
-      };
-    });
-
-    // Chunking for performance (TiDB/MySQL)
-    const chunkSize = 50;
-    for (let i = 0; i < formattedData.length; i += chunkSize) {
-      const chunk = formattedData.slice(i, i + chunkSize);
-
-      await db.insert(testCases)
-        .values(chunk as any)
-        .onDuplicateKeyUpdate({
-          set: {
-            title: sql`VALUES(title)`,
-            description: sql`VALUES(description)`,
-            precondition: sql`VALUES(precondition)`,
-            steps: sql`VALUES(steps)`,
-            //@ts-ignore
-            expected_result: sql`VALUES(expected_result)`, // DB column name
-            priority: sql`VALUES(priority)`,
-            module_name: sql`VALUES(module_name)`,
-            test_suite: sql`VALUES(test_suite)`,
-            tags: sql`VALUES(tags)`,
-            logged_user: sql`VALUES(logged_user)`,
-            shareable_link: sql`VALUES(shareable_link)`,
-            updatedAt: new Date()
-          }
-        });
-    }
-
-    revalidatePath(`/projects/${projectId}/manual`);
-    return { success: true, count: formattedData.length };
-
-  } catch (error: any) {
-    console.error("IMPORT_ERROR:", error);
-    return { success: false, error: "Mapping error: Ensure 'ExpectedResult' column exists." };
-  }
-}
 export async function getProjectManualStats(projectId: number) {
   const allCases = await db.select().from(testCases).where(eq(testCases.projectId, projectId));
 
@@ -1093,4 +905,84 @@ export async function getProjectManualStats(projectId: number) {
     },
     moduleList: Object.values(modules)
   };
+}
+
+const forceSlice = (val: any, limit: number, fallback: string | null = null) => {
+  if (val === undefined || val === null || val === "" || val === "-") return fallback;
+  return String(val).trim().slice(0, limit);
+};
+export async function importTestCases(projectId: number, dataArray: any[]) {
+  try {
+    // 1. GET AUTH CONTEXT
+    const { userId } = await auth();
+    if (!userId) return { success: false, error: "Unauthorized" };
+
+    // 2. GET USER'S ORGANIZATION ID
+    const membership = await db.query.organizationMembers.findFirst({
+      where: eq(organizationMembers.userId, userId),
+    });
+
+    if (!membership) return { success: false, error: "No organization found for user" };
+    const orgId = membership.organizationId;
+
+    // 3. MAP DATA TO SCHEMA (Injecting orgId and projectId)
+    const formattedData = dataArray.map((item, index) => {
+      const find = (key: string) => {
+        const normalizedSearch = key.toLowerCase().replace(/[\s_]/g, "");
+        const targetKey = Object.keys(item).find((actualKey) => {
+          return actualKey.toLowerCase().replace(/[\s_]/g, "") === normalizedSearch;
+        });
+        return targetKey ? item[targetKey] : undefined;
+      };
+
+      return {
+        projectId: Number(projectId),
+        organizationId: orgId, // FIXED: Now explicitly passed to every row
+        caseCode: forceSlice(find('caseCode') || find('case_code'), 100) || `TC-AUTO-${Date.now()}-${index}`,
+        caseKey: forceSlice(find('caseKey'), 100),
+        moduleName: forceSlice(find('moduleName') || find('module_name'), 100, 'GENERAL'),
+        testSuite: forceSlice(find('testSuite') || find('test_suite'), 100),
+        title: String(find('title') || 'Untitled Case'),
+        description: find('description') ? String(find('description')) : null,
+        precondition: find('precondition') ? String(find('precondition')) : null,
+        steps: find('steps') ? String(find('steps')) : null,
+        expectedResult: find('expectedResult') || find('expected_result') ? String(find('expectedResult') || find('expected_result')) : null,
+        priority: forceSlice(find('priorities') || find('priority'), 20, 'medium'),
+        mode: forceSlice(find('mode'), 50, 'manual'),
+        type: forceSlice(find('type'), 50, 'standard'),
+        createdById: userId, // Link to the user who uploaded
+        shareableLink: find('shareableTestCaseDetails') || find('shareable_link') ? String(find('shareableTestCaseDetails') || find('shareable_link')) : null,
+        tags: find('tags') ? String(find('tags')) : null,
+      };
+    });
+
+    // 4. CHUNKED BATCH UPSERT (Optimized for TiDB)
+    const chunkSize = 40; 
+    for (let i = 0; i < formattedData.length; i += chunkSize) {
+      const chunk = formattedData.slice(i, i + chunkSize);
+      
+      await db.insert(testCases)
+        .values(chunk as any)
+        .onDuplicateKeyUpdate({
+          set: {
+            title: sql`VALUES(title)`,
+            //@ts-ignore
+            module_name: sql`VALUES(module_name)`,
+            description: sql`VALUES(description)`,
+            steps: sql`VALUES(steps)`,
+            expected_result: sql`VALUES(expected_result)`,
+            priority: sql`VALUES(priority)`,
+            tags: sql`VALUES(tags)`,
+            updatedAt: new Date()
+          }
+        });
+    }
+    
+    revalidatePath(`/projects/${projectId}/manual`);
+    return { success: true, count: formattedData.length };
+
+  } catch (error: any) {
+    console.error("IMPORT_CRITICAL_ERROR:", error);
+    return { success: false, error: error.message };
+  }
 }
