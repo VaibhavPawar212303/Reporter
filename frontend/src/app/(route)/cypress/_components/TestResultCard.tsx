@@ -1,12 +1,24 @@
 'use client';
 import React from "react";
-import { CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, GitCommit } from "lucide-react";
+import { CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const cleanAnsi = (t: any) => typeof t === 'string' ? t.replace(/[\u001b\x1b]\[[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '').trim() : t;
 
+// Helper to normalize various status strings from different test runners
+const getStatusType = (status: string) => {
+  const s = status?.toLowerCase() || '';
+  if (['passed', 'success', 'expected'].includes(s)) return 'passed';
+  if (['failed', 'error', 'fail'].includes(s)) return 'failed';
+  if (s === 'running') return 'running';
+  return 'skipped';
+};
+
 export function TestResultCard({ test, isExpanded, onToggle }: any) {
-  const isPassed = test.status === 'passed';
+  // Normalize the main test status
+  const statusType = getStatusType(test.status);
+  const isPassed = statusType === 'passed';
+  const isFailed = statusType === 'failed';
 
   const branchStyles = [
     { line: 'border-amber-500', bg: 'bg-amber-500', text: 'text-amber-500' },
@@ -18,14 +30,18 @@ export function TestResultCard({ test, isExpanded, onToggle }: any) {
   return (
     <div className={cn(
       "border bg-[#09090b] rounded-none mb-0.5 transition-all font-mono",
-      isPassed ? "border-zinc-800 hover:border-emerald-500/30" : "border-zinc-800 hover:border-rose-500/30",
+      // UI feedback based on normalized status
+      isPassed ? "border-zinc-800 hover:border-emerald-500/30" : 
+      isFailed ? "border-zinc-800 hover:border-rose-500/30" : "border-zinc-800",
       isExpanded && "border-zinc-700 shadow-xl"
     )}>
 
       {/* --- Main Test Header --- */}
       <div onClick={onToggle} className="px-4 py-2.5 flex items-center justify-between cursor-pointer hover:bg-zinc-900/40 select-none">
         <div className="flex items-center gap-3">
-          <div className={isPassed ? "text-emerald-500" : "text-rose-500"}>
+          <div className={cn(
+            isPassed ? "text-emerald-500" : isFailed ? "text-rose-500" : "text-indigo-400"
+          )}>
             {isPassed ? <CheckCircle2 size={16} strokeWidth={2.5} /> : <XCircle size={16} strokeWidth={2.5} />}
           </div>
           <div className="flex items-baseline gap-3">
@@ -51,17 +67,18 @@ export function TestResultCard({ test, isExpanded, onToggle }: any) {
           )}>
             <div className="flex flex-col">
               
-              {/* Central Git Rail (Hidden behind nodes) */}
+              {/* Central Git Rail */}
               <div className="absolute left-[64px] top-0 bottom-0 w-[1px] bg-zinc-800 z-0" />
 
               {test.steps?.map((step: any, i: number) => {
                 const style = branchStyles[i % branchStyles.length];
                 const isOdd = i % 2 !== 0;
+                const stepStatus = getStatusType(step.status);
 
                 return (
                   <div key={i} className={cn(
                     "flex items-center group relative min-h-[32px] transition-colors border-l-2 border-l-transparent",
-                    isOdd ? "bg-white/[0.02]" : "bg-transparent", // Striping
+                    isOdd ? "bg-white/[0.02]" : "bg-transparent", 
                     "hover:bg-blue-500/5 hover:border-l-blue-500"
                   )}>
                     
@@ -70,20 +87,17 @@ export function TestResultCard({ test, isExpanded, onToggle }: any) {
                       {(i + 1).toString().padStart(2, '0')}
                     </div>
 
-                    {/* 2. Git Graph Column (Concise Arcs) */}
+                    {/* 2. Git Graph Column */}
                     <div className="relative w-10 shrink-0 flex justify-center z-10 h-full mt-5">
-                      {/* Arc Curve */}
                       {isOdd && (
                         <div className={cn(
                           "absolute left-[50%] top-[-16px] bottom-[50%] w-4 border-l-[1.5px] border-b-[1.5px] rounded-bl-lg -translate-x-[0.5px] opacity-30",
                           style.line
                         )} />
                       )}
-                      {/* Commit Node */}
                       <div className={cn(
                         "w-2 h-2 rounded-full border border-[#0c0c0e] z-20",
-                        style.bg,
-                        step.status === 'failed' && "bg-rose-600 ring-2 ring-rose-900"
+                        stepStatus === 'failed' ? "bg-rose-600 ring-2 ring-rose-900" : style.bg
                       )} />
                     </div>
 
@@ -91,7 +105,7 @@ export function TestResultCard({ test, isExpanded, onToggle }: any) {
                     <div className="flex-1 flex items-center gap-3 px-2 min-w-0 overflow-hidden">
                       <span className={cn(
                         "text-[12px] font-black uppercase tracking-tighter shrink-0",
-                        style.text
+                        stepStatus === 'failed' ? "text-rose-500" : style.text
                       )}>
                         {step.command}
                       </span>
@@ -103,7 +117,7 @@ export function TestResultCard({ test, isExpanded, onToggle }: any) {
 
                     {/* 4. Metadata / Duration */}
                     <div className="shrink-0 flex items-center gap-3 px-4">
-                        <span className="text-[8px] text-zinc-700 font-bold uppercase tracking-widest hidden sm:block">vaibhav_sys</span>
+                        <span className="text-[8px] text-zinc-700 font-bold uppercase tracking-widest hidden sm:block">worker_node</span>
                         <span className="text-[9px] text-zinc-600 tabular-nums font-bold">{step.duration}</span>
                     </div>
                   </div>
@@ -112,8 +126,8 @@ export function TestResultCard({ test, isExpanded, onToggle }: any) {
             </div>
           </div>
 
-          {/* Failure Log Box (Only if test failed) */}
-          {!isPassed && (
+          {/* Failure Log Box */}
+          {isFailed && (
             <div className="p-4 bg-rose-950/20 border-t border-rose-900/30">
                <div className="flex items-center gap-2 text-rose-500 text-[9px] font-black uppercase tracking-[0.2em] mb-2">
                  <XCircle size={10} /> Stacktrace_Output
