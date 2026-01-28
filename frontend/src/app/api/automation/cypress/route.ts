@@ -1,146 +1,171 @@
-// src/app/api/automation/result/route.ts
 import { NextResponse } from 'next/server';
-import { eq, and } from 'drizzle-orm';
-import { auth } from '@clerk/nextjs/server';
+import { eq, and, sql } from 'drizzle-orm';
 import { db } from '../../../../../db';
-import { automationBuilds, organizationMembers, testResults } from '../../../../../db/schema';
+import { automationBuilds, testResults, projects } from '../../../../../db/schema';
+
+const DEBUG_MODE = true;
+
+/* -------------------- HELPER FUNCTIONS -------------------- */
+
+const debugLog = (section: string, data: any) => {
+  if (!DEBUG_MODE) return;
+  console.log(`🔍 [CYPRESS-DEBUG] ${section}:`, typeof data === 'object' ? JSON.stringify(data, null, 2) : data);
+};
+
+const cleanAnsi = (text: any): string => {
+  if (!text || typeof text !== 'string') return String(text || '');
+  return text.replace(/[\u001b\x1b]\[[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '').trim();
+};
+
+const normalizeStatus = (status: string): string => {
+  const s = status?.toUpperCase();
+  if (['PASSED', 'SUCCESS'].includes(s)) return 'PASSED';
+  if (['FAILED', 'ERROR'].includes(s)) return 'FAILED';
+  if (['PENDING', 'SKIPPED'].includes(s)) return 'SKIPPED';
+  return 'RUNNING';
+};
+
+/* -------------------- CONCURRENCY LOCK -------------------- */
+// Prevents race conditions when multiple tests in the same spec update the JSON array simultaneously
+const locks = new Map<string, Promise<void>>();
+
+async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  while (locks.has(key)) await locks.get(key);
+  let resolve: () => void;
+  const promise = new Promise<void>((r) => { resolve = r; });
+  locks.set(key, promise);
+  try { return await fn(); } 
+  finally { locks.delete(key); resolve!(); }
+}
+
+/* -------------------- POST HANDLER -------------------- */
 
 export async function POST(req: Request) {
   try {
-    const { userId } = await auth();
-
-    if (!userId) {
+    // 1. API Key Authentication
+    const apiKey = req.headers.get('x-api-key');
+    if (!apiKey || apiKey !== process.env.AUTOMATION_API_KEY) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const body = await req.json();
-    const { build_id, spec_file, test_entry } = body;
+    const { build_id, spec_file, test_entry, project_id } = body;
 
     if (!build_id || !spec_file || !test_entry) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing pipeline data' }, { status: 400 });
     }
 
-    // Get user's organization
-    const membership = await db.query.organizationMembers.findFirst({
-      where: eq(organizationMembers.userId, userId),
-    });
-
-    if (!membership) {
-      return NextResponse.json({ error: 'No organization found' }, { status: 404 });
-    }
-
-    // Verify Build exists AND belongs to user's organization
+    // 2. Fetch Build and Project Context (for OrgID)
     const build = await db.query.automationBuilds.findFirst({
-      where: and(
-        eq(automationBuilds.id, build_id),
-        eq(automationBuilds.organizationId, membership.organizationId)
-      ),
+      where: eq(automationBuilds.id, Number(build_id)),
     });
 
-    if (!build) {
-      return NextResponse.json({ error: 'Build not found or access denied' }, { status: 404 });
-    }
+    if (!build) return NextResponse.json({ error: 'Build Object not found' }, { status: 404 });
 
-    const projectId = build.projectId;
-    const organizationId = build.organizationId;
+    const lockKey = `${build_id}:${spec_file}`;
 
-    return await db.transaction(async (tx) => {
-      // Find existing spec record for this build
-      const existingRecord = await tx.query.testResults.findFirst({
-        where: and(
-          eq(testResults.buildId, build_id),
-          eq(testResults.specFile, spec_file)
-        ),
-      });
-
-      let updatedTests = existingRecord ? (existingRecord.tests as any[]) : [];
-
-      // Find if this specific test exists in the JSON array
-      const testIndex = updatedTests.findIndex((t: any) =>
-        t.title === test_entry.title &&
-        t.project === test_entry.project &&
-        t.run_number === test_entry.run_number
-      );
-
-      if (testIndex !== -1) {
-        updatedTests[testIndex] = {
-          ...updatedTests[testIndex],
-          ...test_entry,
-          logs: [...(updatedTests[testIndex].logs || []), ...(test_entry.logs || [])],
-        };
-      } else {
-        updatedTests.push(test_entry);
-      }
-
-      // Atomic Upsert with organizationId
-      await tx
-        .insert(testResults)
-        .values({
-          buildId: build_id,
-          projectId: projectId,
-          organizationId: organizationId,
-          specFile: spec_file,
-          tests: updatedTests,
-          executedAt: new Date(),
-        })
-        .onDuplicateKeyUpdate({
-          set: { tests: updatedTests },
+    return await withLock(lockKey, async () => {
+      return await db.transaction(async (tx) => {
+        
+        // 3. Find existing Spec row
+        const existing = await tx.query.testResults.findFirst({
+          where: and(
+            eq(testResults.buildId, Number(build_id)),
+            eq(testResults.specFile, spec_file)
+          ),
         });
 
-      return NextResponse.json({ success: true });
+        let tests: any[] = existing ? [...(existing.tests as any[])] : [];
+
+        // 4. Update Logic (Cypress specific unique key: Title + Run Number)
+        const testUniqueKey = `${test_entry.project || 'default'}::${test_entry.title}`;
+        const testIdx = tests.findIndex((t: any) => 
+          (t.unique_key === testUniqueKey || (t.title === test_entry.title && t.project === test_entry.project)) &&
+          t.run_number === test_entry.run_number
+        );
+
+        const normalizedEntry = {
+          ...test_entry,
+          unique_key: testUniqueKey,
+          status: normalizeStatus(test_entry.status),
+          error: test_entry.error ? {
+            message: cleanAnsi(test_entry.error.message),
+            stack: cleanAnsi(test_entry.error.stack)
+          } : null,
+          updated_at: new Date().toISOString()
+        };
+
+        if (testIdx !== -1) {
+          // Merge logs if they exist to prevent overwriting stream
+          const existingLogs = tests[testIdx].logs || [];
+          const newLogs = test_entry.logs || [];
+          normalizedEntry.logs = [...existingLogs, ...newLogs];
+          tests[testIdx] = normalizedEntry;
+        } else {
+          tests.push({ ...normalizedEntry, created_at: new Date().toISOString() });
+        }
+
+        // 5. Atomic Upsert
+        if (existing) {
+          await tx.update(testResults)
+            .set({ tests: tests as any, executedAt: new Date() })
+            .where(eq(testResults.id, existing.id));
+        } else {
+          await tx.insert(testResults).values({
+            buildId: Number(build_id),
+            projectId: build.projectId,
+            organizationId: build.organizationId,
+            specFile: spec_file,
+            tests: tests as any,
+            executedAt: new Date()
+          });
+        }
+
+        return NextResponse.json({ 
+          success: true, 
+          spec: spec_file,
+          test_count: tests.length 
+        });
+      });
     });
+
   } catch (error: any) {
-    console.error('❌ AUTOMATION RESULT API ERROR:', error.message);
+    console.error("❌ CYPRESS API CRASH:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
-// Get test results for authenticated user's organization
+/* -------------------- GET HANDLER -------------------- */
+
 export async function GET(req: Request) {
   try {
-    const { userId } = await auth();
-
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const { searchParams } = new URL(req.url);
     const buildId = searchParams.get('build_id');
-    const projectId = searchParams.get('project_id');
 
-    // Get user's organization
-    const membership = await db.query.organizationMembers.findFirst({
-      where: eq(organizationMembers.userId, userId),
-    });
+    if (!buildId) return NextResponse.json({ error: 'build_id required' }, { status: 400 });
 
-    if (!membership) {
-      return NextResponse.json({ error: 'No organization found' }, { status: 404 });
-    }
-
-    // Build query conditions
-    const conditions = [eq(testResults.organizationId, membership.organizationId)];
-
-    if (buildId) {
-      conditions.push(eq(testResults.buildId, Number(buildId)));
-    }
-
-    if (projectId) {
-      conditions.push(eq(testResults.projectId, Number(projectId)));
-    }
-
-    // Fetch results
     const results = await db.query.testResults.findMany({
-      where: and(...conditions),
-      with: {
-        build: true,
-        project: true,
-      },
-      orderBy: (results, { desc }) => [desc(results.executedAt)],
+      where: eq(testResults.buildId, Number(buildId)),
+      orderBy: (t, { desc }) => [desc(t.executedAt)]
     });
 
-    return NextResponse.json(results);
+    // Calculate Summary
+    let total = 0, passed = 0, failed = 0;
+    results.forEach(r => {
+      (r.tests as any[]).forEach(t => {
+        total++;
+        if (t.status === 'PASSED') passed++;
+        if (t.status === 'FAILED') failed++;
+      });
+    });
+
+    return NextResponse.json({
+      success: true,
+      build_id: buildId,
+      summary: { total, passed, failed, pass_rate: total > 0 ? Math.round((passed/total)*100) : 0 },
+      results
+    });
   } catch (error: any) {
-    console.error('❌ GET RESULTS ERROR:', error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

@@ -1,15 +1,15 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useMemo, Suspense } from "react"; // Added Suspense
+import React, { useEffect, useState, useCallback, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   getBuildHistory, getCypressBuildDetails, getMasterTestCases,
   getCypressTestSteps, getCypressGlobalStats, getCypressTrend
 } from "@/lib/actions";
 import {
-  Loader2, Zap, Target, CheckCircle2, XCircle, FileText,
-  Activity, ListFilter, LayoutDashboard, TrendingUp, Monitor, Clock, 
-  ChevronRight, ArrowUpRight, ArrowDownRight, Server, Command, Box, Calendar
+  Loader2, Zap, Target, FileText,
+  Activity, LayoutDashboard, TrendingUp, Monitor, Clock, 
+  Server, Command, Box, Calendar
 } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -19,7 +19,15 @@ import { TestResultCard } from "./_components/TestResultCard";
 import { BuildIntelligencePanel } from "./_components/BuildIntelligencePanel";
 import { cn } from "@/lib/utils";
 
-// 1. Move the original logic into a Content component
+// --- STATUS NORMALIZATION HELPER ---
+const getEffectiveStatus = (status: string) => {
+  const s = status?.toLowerCase();
+  if (['passed', 'expected', 'success'].includes(s)) return 'passed';
+  if (['failed', 'error'].includes(s)) return 'failed';
+  if (s === 'running') return 'running';
+  return 'skipped';
+};
+
 function AutomationDashboardContent() {
   const searchParams = useSearchParams();
   const urlBuildId = searchParams.get('buildId');
@@ -69,11 +77,8 @@ function AutomationDashboardContent() {
   }, []);
 
   useEffect(() => {
-    if (urlBuildId) {
-      loadDirectBuild(urlBuildId);
-    } else {
-      loadInitialData();
-    }
+    if (urlBuildId) loadDirectBuild(urlBuildId);
+    else loadInitialData();
   }, [urlBuildId, loadDirectBuild, loadInitialData]);
 
   const handleBuildSelect = async (build: any) => {
@@ -97,11 +102,35 @@ function AutomationDashboardContent() {
     }
   };
 
+  // --- LOGIC FIX: Normalized filtering and stats for spec groups ---
   const specGroups = useMemo(() => {
     if (!buildDetails?.results) return {};
     return buildDetails.results.reduce((acc: any, res: any) => {
-      const filtered = res.tests?.filter((t: any) => (filterStatus === 'all' || t.status === filterStatus) && (!specSearch || res.specFile.toLowerCase().includes(specSearch.toLowerCase())));
-      if (filtered?.length > 0) acc[res.specFile] = { id: res.id, tests: filtered, stats: res.stats, env: res.envInfo };
+      // Filter tests using effective status
+      const filtered = res.tests?.filter((t: any) => {
+        const effective = getEffectiveStatus(t.status);
+        const matchesStatus = filterStatus === 'all' || effective === filterStatus;
+        const matchesSearch = !specSearch || res.specFile.toLowerCase().includes(specSearch.toLowerCase());
+        return matchesStatus && matchesSearch;
+      });
+
+      // Recalculate stats for the bar based on normalized values
+      const specStats = res.tests?.reduce((s: any, t: any) => {
+          const effective = getEffectiveStatus(t.status);
+          if (effective === 'passed') s.passed++;
+          if (effective === 'failed') s.failed++;
+          return s;
+      }, { passed: 0, failed: 0 });
+
+      if (filtered?.length > 0) {
+        acc[res.specFile] = { 
+            id: res.id, 
+            tests: filtered, 
+            stats: specStats, 
+            totalTests: res.tests?.length || 0,
+            env: res.envInfo 
+        };
+      }
       return acc;
     }, {});
   }, [buildDetails, filterStatus, specSearch]);
@@ -120,7 +149,7 @@ function AutomationDashboardContent() {
             <div className="p-5 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
             <div className="flex items-center gap-3">
                 <Server size={14} className="text-zinc-500" />
-                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">Registry / CY_ARCHIVE</span>
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">Registry</span>
             </div>
             <button 
                 onClick={() => { setSelectedBuild(null); setBuildDetails(null); }} 
@@ -195,10 +224,10 @@ function AutomationDashboardContent() {
                         </div>
                         <div className="flex items-center gap-4">
                            <div className="w-32 h-1 bg-zinc-800 rounded-none overflow-hidden flex">
-                              <div className="h-full bg-emerald-500" style={{ width: `${(group.stats.passed/group.tests.length)*100}%` }} />
-                              <div className="h-full bg-rose-500" style={{ width: `${(group.stats.failed/group.tests.length)*100}%` }} />
+                              <div className="h-full bg-emerald-500" style={{ width: `${(group.stats.passed/group.totalTests)*100}%` }} />
+                              <div className="h-full bg-rose-500" style={{ width: `${(group.stats.failed/group.totalTests)*100}%` }} />
                            </div>
-                           <span className="text-[10px] font-mono text-zinc-400">{group.stats.passed}/{group.tests.length} PASS</span>
+                           <span className="text-[10px] font-mono text-zinc-400">{group.stats.passed}/{group.totalTests} PASS</span>
                         </div>
                       </div>
                       <div className="divide-y divide-zinc-800/30">
@@ -218,23 +247,18 @@ function AutomationDashboardContent() {
   );
 }
 
-// 2. Export the main component wrapped in Suspense
 export default function AutomationDashboard() {
   return (
-    <Suspense fallback={
-        <div className="h-screen flex flex-col items-center justify-center bg-[#09090b]">
-            <Loader2 className="w-8 h-8 text-zinc-500 animate-spin" />
-        </div>
-    }>
+    <Suspense fallback={<div className="h-screen flex flex-col items-center justify-center bg-[#09090b]"><Loader2 className="w-8 h-8 text-zinc-500 animate-spin" /></div>}>
       <AutomationDashboardContent />
     </Suspense>
   );
 }
 
 function StatCard({ title, value, icon, color }: any) {
-  const accentColors: any = { indigo: 'border-t-indigo-500', emerald: 'border-t-emerald-500', zinc: 'border-t-zinc-700' };
+  const accents: any = { indigo: 'border-t-indigo-500', emerald: 'border-t-emerald-500', zinc: 'border-t-zinc-700' };
   return (
-    <div className={cn("bg-[#111114] border border-zinc-800 border-t-2 rounded-none p-8 flex flex-col justify-between min-h-[160px]", accentColors[color])}>
+    <div className={cn("bg-[#111114] border border-zinc-800 border-t-2 rounded-none p-8 flex flex-col justify-between min-h-[160px]", accents[color])}>
       <div className="text-zinc-500">{icon}</div>
       <div>
         <h3 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">{title}</h3>
