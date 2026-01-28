@@ -33,7 +33,7 @@ export function RegisterProjectModal({ isOpen, onClose, onSuccess }: any) {
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm font-mono selection:bg-indigo-500/30">
       
       {/* 2. MODAL CONTAINER: Fixed max-width prevents stretching */}
-      <div className="w-40 bg-[#111114] border border-zinc-800 rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+      <div className="w-98 bg-[#111114] border border-zinc-800 rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
         
         {/* HEADER */}
         <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex justify-between items-center">
