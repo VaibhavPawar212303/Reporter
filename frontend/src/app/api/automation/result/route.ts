@@ -1,12 +1,13 @@
 // src/app/api/automation/result/route.ts
 import { NextResponse } from 'next/server';
 import { eq, and } from 'drizzle-orm';
-import { auth } from '@clerk/nextjs/server';
 import { db } from '../../../../../db';
-import { automationBuilds, organizationMembers, testResults } from '../../../../../db/schema';
+import { automationBuilds, testResults } from '../../../../../db/schema';
 
 
 const DEBUG_MODE = true;
+
+/* -------------------- HELPER FUNCTIONS -------------------- */
 
 const debugLog = (section: string, data: any) => {
   if (!DEBUG_MODE) return;
@@ -39,10 +40,8 @@ const getUniqueTestKey = (test_entry: any): string => {
   return `${test_entry?.project || 'default'}::${test_entry?.title || 'unknown'}`;
 };
 
-/**
- * Mutex lock to prevent race conditions
- * Simple in-memory lock per build_id + spec_file
- */
+/* -------------------- MUTEX LOCK -------------------- */
+
 const locks = new Map<string, Promise<void>>();
 
 async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
@@ -64,14 +63,19 @@ async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/* -------------------- POST HANDLER -------------------- */
+
 export async function POST(req: Request) {
   const requestId = `REQ-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
 
   try {
-    const { userId } = await auth();
+    // Verify API key
+    const apiKey = req.headers.get('x-api-key');
+    const validApiKey = process.env.AUTOMATION_API_KEY;
 
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!apiKey || apiKey !== validApiKey) {
+      console.error(`❌ [${requestId}] Invalid API key`);
+      return NextResponse.json({ error: 'Invalid API key' }, { status: 401 });
     }
 
     const body = await req.json();
@@ -81,30 +85,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: validation.error }, { status: 400 });
     }
 
-    // Get user's organization
-    const membership = await db.query.organizationMembers.findFirst({
-      where: eq(organizationMembers.userId, userId),
-    });
-
-    if (!membership) {
-      return NextResponse.json({ error: 'No organization found' }, { status: 404 });
-    }
-
     const build_id = typeof body.build_id === 'string' ? parseInt(body.build_id, 10) : body.build_id;
     const { spec_file, test_entry, unique_test_key } = body;
     const testUniqueKey = unique_test_key || getUniqueTestKey(test_entry);
     const isFinal = test_entry?.is_final === true;
 
-    // Verify build belongs to user's organization
+    // Get build to find organizationId and projectId
     const build = await db.query.automationBuilds.findFirst({
-      where: and(
-        eq(automationBuilds.id, build_id),
-        eq(automationBuilds.organizationId, membership.organizationId)
-      ),
+      where: eq(automationBuilds.id, build_id),
     });
 
     if (!build) {
-      return NextResponse.json({ error: 'Build not found or access denied' }, { status: 404 });
+      return NextResponse.json({ error: 'Build not found' }, { status: 404 });
     }
 
     const lockKey = `${build_id}:${spec_file}`;
@@ -115,13 +107,12 @@ export async function POST(req: Request) {
       testUniqueKey,
       isFinal,
       status: test_entry?.status,
-      userId,
-      organizationId: membership.organizationId,
+      organizationId: build.organizationId,
     });
 
     return await withLock(lockKey, async () => {
       return await db.transaction(async (tx) => {
-        // 1. Get existing record
+        // Get existing record
         const existing = await tx.query.testResults.findFirst({
           where: and(
             eq(testResults.buildId, build_id),
@@ -136,7 +127,7 @@ export async function POST(req: Request) {
           keys: tests.map((t) => `${t.project}::${t.title}`),
         });
 
-        // 2. Find test by unique key
+        // Find test by unique key
         let testIdx = tests.findIndex((t: any) => {
           const key = `${t.project || 'default'}::${t.title || 'unknown'}`;
           return key === testUniqueKey;
@@ -145,7 +136,7 @@ export async function POST(req: Request) {
         const existingTest = testIdx !== -1 ? tests[testIdx] : null;
         const existingIsFinal = existingTest?.is_final === true;
 
-        // 3. Skip if existing is final and incoming is not
+        // Skip if existing is final and incoming is not
         if (existingIsFinal && !isFinal) {
           debugLog(`SKIPPED [${requestId}]`, { reason: 'Final exists', testUniqueKey });
           return NextResponse.json({
@@ -156,7 +147,7 @@ export async function POST(req: Request) {
           });
         }
 
-        // 4. Create or update test
+        // Create or update test
         if (testIdx === -1 && test_entry) {
           tests.push({
             title: test_entry.title,
@@ -217,7 +208,7 @@ export async function POST(req: Request) {
           })),
         });
 
-        // 5. Save to database
+        // Save to database
         if (existing) {
           await tx
             .update(testResults)
@@ -227,13 +218,13 @@ export async function POST(req: Request) {
           await tx.insert(testResults).values({
             buildId: build_id as any,
             projectId: build.projectId,
-            organizationId: membership.organizationId,
+            organizationId: build.organizationId,
             specFile: spec_file,
             tests: tests as any,
           });
         }
 
-        // 6. Calculate stats for response
+        // Calculate stats
         const finalTests = tests.filter((t: any) => t.is_final === true);
         const stats = {
           total_tests: tests.length,
@@ -267,21 +258,16 @@ export async function POST(req: Request) {
   }
 }
 
+/* -------------------- GET HANDLER -------------------- */
+
 export async function GET(req: Request) {
   try {
-    const { userId } = await auth();
+    // Verify API key
+    const apiKey = req.headers.get('x-api-key');
+    const validApiKey = process.env.AUTOMATION_API_KEY;
 
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Get user's organization
-    const membership = await db.query.organizationMembers.findFirst({
-      where: eq(organizationMembers.userId, userId),
-    });
-
-    if (!membership) {
-      return NextResponse.json({ error: 'No organization found' }, { status: 404 });
+    if (!apiKey || apiKey !== validApiKey) {
+      return NextResponse.json({ error: 'Invalid API key' }, { status: 401 });
     }
 
     const { searchParams } = new URL(req.url);
@@ -290,8 +276,12 @@ export async function GET(req: Request) {
     const only_final = searchParams.get('only_final') === 'true';
     const debug = searchParams.get('debug') === 'true';
 
-    // Build query conditions - always filter by organization
-    const conditions = [eq(testResults.organizationId, membership.organizationId)];
+    if (!build_id_param && !project_id_param) {
+      return NextResponse.json({ error: 'Missing build_id or project_id' }, { status: 400 });
+    }
+
+    // Build query conditions
+    const conditions = [];
 
     if (build_id_param) {
       const build_id = parseInt(build_id_param, 10);
@@ -310,11 +300,7 @@ export async function GET(req: Request) {
     }
 
     const results = await db.query.testResults.findMany({
-      where: and(...conditions),
-      with: {
-        build: true,
-        project: true,
-      },
+      where: conditions.length > 0 ? and(...conditions) : undefined,
       orderBy: (results, { desc }) => [desc(results.executedAt)],
     });
 
@@ -326,7 +312,6 @@ export async function GET(req: Request) {
         const key = t.unique_key || `${t.project}::${t.title}`;
         const existing = allTestsMap.get(key);
 
-        // Priority: is_final=true wins
         if (!existing || (t.is_final && !existing.is_final)) {
           allTestsMap.set(key, { ...t, unique_key: key });
         }
