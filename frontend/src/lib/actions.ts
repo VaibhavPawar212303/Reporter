@@ -1,7 +1,7 @@
 "use server"
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import { automationBuilds, organizationMembers, projects, testCases, testResults } from '../../db/schema';
+import { automationBuilds, organizationMembers, projects, testCases, testResults, users } from '../../db/schema';
 import { revalidatePath } from "next/cache";
 import { db } from '../../db';
 import { auth } from '@clerk/nextjs/server';
@@ -245,6 +245,7 @@ export async function updateTestCase(id: number, data: any) {
     return { error: error.message };
   }
 }
+
 export async function getDashboardStats() {
   const builds = await db.select().from(automationBuilds).orderBy(desc(automationBuilds.id)).limit(50);
   const totalRequirements = await db.select({ count: sql<number>`count(*)` }).from(testCases);
@@ -270,50 +271,95 @@ export async function getBuildHistory() {
     type: automationBuilds.type
   }).from(automationBuilds).orderBy(desc(automationBuilds.id)).limit(30);
 }
-export async function getPlaywrightTrend() {
+
+
+export async function getPlaywrightTrend(projectId?: number) {
   try {
-    const builds = await db.select({ id: automationBuilds.id })
+    const { userId } = await auth();
+
+    if (!userId) {
+      return { error: 'Unauthorized' };
+    }
+
+    // Get user's organization
+    const membership = await db.query.organizationMembers.findFirst({
+      where: eq(organizationMembers.userId, userId),
+    });
+
+    if (!membership) {
+      return { error: 'No organization found' };
+    }
+
+    // Build query conditions
+    const conditions = [
+      eq(automationBuilds.type, 'playwright'),
+      eq(automationBuilds.organizationId, membership.organizationId),
+    ];
+
+    // Optionally filter by project
+    if (projectId) {
+      conditions.push(eq(automationBuilds.projectId, projectId));
+    }
+
+    // Get last 10 builds
+    const builds = await db
+      .select({ id: automationBuilds.id })
       .from(automationBuilds)
-      .where(eq(automationBuilds.type, 'playwright'))
+      .where(and(...conditions))
       .orderBy(desc(automationBuilds.id))
       .limit(10);
 
     if (builds.length === 0) return [];
-    const buildIds = builds.map(b => b.id);
 
-    const results = await db.select().from(testResults).where(inArray(testResults.buildId, buildIds));
+    const buildIds = builds.map((b) => b.id);
 
-    return builds.map(b => {
-      let passed = 0, total = 0;
-      const buildSpecs = results.filter(r => r.buildId === b.id);
-      buildSpecs.forEach(spec => {
-        (spec.tests as any[])?.forEach(t => {
-          total++;
-          if (['passed', 'expected', 'success'].includes(t.status?.toLowerCase())) passed++;
+    // Get results for these builds
+    const results = await db
+      .select()
+      .from(testResults)
+      .where(
+        and(
+          inArray(testResults.buildId, buildIds),
+          eq(testResults.organizationId, membership.organizationId)
+        )
+      );
+
+    // Calculate trend data
+    return builds
+      .map((b) => {
+        let passed = 0,
+          failed = 0,
+          total = 0;
+
+        const buildSpecs = results.filter((r) => r.buildId === b.id);
+
+        buildSpecs.forEach((spec) => {
+          (spec.tests as any[])?.forEach((t) => {
+            if (t.is_final) {
+              total++;
+              const status = t.status?.toLowerCase();
+              if (['passed', 'expected', 'success'].includes(status)) {
+                passed++;
+              } else if (['failed', 'unexpected', 'error'].includes(status)) {
+                failed++;
+              }
+            }
+          });
         });
-      });
-      return { name: `#${b.id}`, passed, total };
-    }).reverse();
-  } catch (e) { return []; }
-}
-export async function getBuildDetails(buildId: number) {
-  try {
-    const build = await db.query.automationBuilds.findFirst({ where: eq(automationBuilds.id, buildId) });
-    if (!build) return null;
 
-    const results = await db.select().from(testResults).where(eq(testResults.buildId, buildId));
-
-    return {
-      ...build,
-      results: results.map(r => ({
-        ...r,
-        tests: (r.tests as any[]).map(t => ({
-          ...t,
-          has_details: !!(t.steps?.length || t.logs?.length || t.error)
-        }))
-      }))
-    };
-  } catch (e) { return null; }
+        return {
+          name: `#${b.id}`,
+          passed,
+          failed,
+          total,
+          passRate: total > 0 ? Math.round((passed / total) * 100) : 0,
+        };
+      })
+      .reverse();
+  } catch (e: any) {
+    console.error('getPlaywrightTrend error:', e.message);
+    return [];
+  }
 }
 export async function getTestSteps(specId: number, testTitle: string) {
   try {
@@ -608,6 +654,144 @@ export async function createProject(formData: {
     return { success: false, error: error.message || 'Failed to register project' };
   }
 }
+
+export async function getBuildDetails(buildId: number) {
+  try {
+    console.log('\n' + '='.repeat(60));
+    console.log('🔍 getBuildDetails called with buildId:', buildId);
+    console.log('='.repeat(60));
+
+    const { userId } = await auth();
+    console.log('📋 Step 1: userId:', userId);
+
+    if (!userId) {
+      console.log('❌ No userId found');
+      return { error: 'Unauthorized' };
+    }
+
+    // Get user's organization
+    console.log('📋 Step 2: Getting organization membership');
+    const membership = await db.query.organizationMembers.findFirst({
+      where: eq(organizationMembers.userId, userId),
+    });
+    console.log('   - Membership:', membership);
+
+    if (!membership) {
+      console.log('❌ No organization found for user');
+      return { error: 'No organization found' };
+    }
+
+    console.log('   - Organization ID:', membership.organizationId);
+
+    // Get build (simple query without 'with')
+    console.log('📋 Step 3: Getting build');
+    console.log('   - Looking for buildId:', buildId);
+    console.log('   - With organizationId:', membership.organizationId);
+
+    const build = await db
+      .select()
+      .from(automationBuilds)
+      .where(
+        and(
+          eq(automationBuilds.id, buildId),
+          eq(automationBuilds.organizationId, membership.organizationId)
+        )
+      )
+      .limit(1);
+
+    console.log('   - Build query result:', build);
+    console.log('   - Build length:', build?.length);
+
+    if (!build || build.length === 0) {
+      console.log('❌ Build not found');
+      
+      // Debug: Check if build exists without org filter
+      const buildWithoutOrg = await db
+        .select()
+        .from(automationBuilds)
+        .where(eq(automationBuilds.id, buildId))
+        .limit(1);
+      
+      console.log('   - Build without org filter:', buildWithoutOrg);
+      if (buildWithoutOrg.length > 0) {
+        console.log('   - Build exists but has different organizationId:', buildWithoutOrg[0].organizationId);
+      }
+      
+      return null;
+    }
+
+    const buildData = build[0];
+    console.log('✅ Build found:', {
+      id: buildData.id,
+      projectId: buildData.projectId,
+      organizationId: buildData.organizationId,
+      status: buildData.status,
+    });
+
+    // Get project separately
+    console.log('📋 Step 4: Getting project');
+    let project = null;
+    if (buildData.projectId) {
+      const projectResult = await db
+        .select()
+        .from(projects)
+        .where(eq(projects.id, buildData.projectId))
+        .limit(1);
+      project = projectResult[0] || null;
+      console.log('   - Project:', project?.name);
+    }
+
+    // Get triggered by user separately
+    console.log('📋 Step 5: Getting triggered by user');
+    let triggeredBy = null;
+    if (buildData.triggeredById) {
+      const userResult = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, buildData.triggeredById))
+        .limit(1);
+      triggeredBy = userResult[0] || null;
+      console.log('   - Triggered by:', triggeredBy?.email);
+    }
+
+    // Get test results for this build
+    console.log('📋 Step 6: Getting test results');
+    const results = await db
+      .select()
+      .from(testResults)
+      .where(eq(testResults.buildId, buildId));
+    console.log('   - Results count:', results.length);
+
+    const finalResult = {
+      ...buildData,
+      project: project,
+      triggeredBy: triggeredBy,
+      results: results.map((r) => ({
+        ...r,
+        tests: Array.isArray(r.tests)
+          ? (r.tests as any[]).map((t) => ({
+              ...t,
+              has_details: !!(t.steps?.length || t.logs?.length || t.error),
+            }))
+          : [],
+      })),
+    };
+
+    console.log('✅ Final result:', {
+      buildId: finalResult.id,
+      projectName: finalResult.project?.name,
+      resultsCount: finalResult.results.length,
+      totalTests: finalResult.results.reduce((acc, r) => acc + r.tests.length, 0),
+    });
+    console.log('='.repeat(60) + '\n');
+
+    return finalResult;
+  } catch (e: any) {
+    console.error('❌ getBuildDetails error:', e.message);
+    console.error('   Stack:', e.stack);
+    return null;
+  }
+}
 export async function getProjects() {
   const { userId } = await auth();
 
@@ -655,16 +839,62 @@ export async function getProjectById(id: number) {
   return res[0];
 }
 export async function getBuildsByProjectAndType(projectId: number, type: string) {
-  return await db.select()
-    .from(automationBuilds)
-    .where(
-      and(
-        eq(automationBuilds.projectId, projectId),
-        eq(automationBuilds.type, type.toLowerCase()) // ensures 'Cypress' matches 'cypress'
+  try {
+    const { userId } = await auth();
+
+    if (!userId) {
+      return { error: 'Unauthorized' };
+    }
+
+    // Get user's organization
+    const membership = await db.query.organizationMembers.findFirst({
+      where: eq(organizationMembers.userId, userId),
+    });
+
+    if (!membership) {
+      return { error: 'No organization found' };
+    }
+
+    // Verify project belongs to user's organization
+    const project = await db
+      .select()
+      .from(projects)
+      .where(
+        and(
+          eq(projects.id, projectId),
+          eq(projects.organizationId, membership.organizationId)
+        )
       )
-    )
-    .orderBy(desc(automationBuilds.createdAt));
+      .limit(1);
+
+    if (!project || project.length === 0) {
+      return { error: 'Project not found or access denied' };
+    }
+
+    // Get builds for this project and type
+    const builds = await db
+      .select()
+      .from(automationBuilds)
+      .where(
+        and(
+          eq(automationBuilds.projectId, projectId),
+          eq(automationBuilds.type, type.toLowerCase()),
+          eq(automationBuilds.organizationId, membership.organizationId)
+        )
+      )
+      .orderBy(desc(automationBuilds.createdAt));
+
+    return builds;
+  } catch (e: any) {
+    console.error('getBuildsByProjectAndType error:', e.message);
+    return { error: e.message };
+  }
 }
+
+
+
+
+
 export async function getTestCasesByProject(projectId: number) {
   return await db.select()
     .from(testCases)
