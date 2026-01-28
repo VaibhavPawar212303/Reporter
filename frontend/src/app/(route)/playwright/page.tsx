@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   getBuildHistory,
   getMasterTestCases,
@@ -25,7 +26,7 @@ import { ProjectLevelStats } from "./_components/ProjectLevelStats";
 import { TestRow } from "./_components/TestRow";
 import { cn } from "@/lib/utils";
 
-/* -------------------- HELPERS -------------------- */
+/* -------------------- HELPERS (Maintained) -------------------- */
 function normalizeStatus(status: string): 'passed' | 'failed' | 'running' | 'skipped' {
   if (!status) return 'running';
   const s = status.toLowerCase().trim();
@@ -58,8 +59,14 @@ function normalizePlaywrightResults(specResults: any[]) {
   return Array.from(testMap.values());
 }
 
-/* -------------------- COMPONENT -------------------- */
-export default function PlaywrightDashboard() {
+/* -------------------------------------------------------------------------- */
+/*                               DASHBOARD CONTENT                             */
+/* -------------------------------------------------------------------------- */
+function PlaywrightDashboardContent() {
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get('projectId');
+  const urlBuildId = searchParams.get('buildId');
+
   const [builds, setBuilds] = useState<any[]>([]);
   const [trendData, setTrendData] = useState<any[]>([]);
   const [masterCases, setMasterCases] = useState<any[]>([]);
@@ -73,7 +80,6 @@ export default function PlaywrightDashboard() {
   const [projectSearch, setProjectSearch] = useState('');
   const [favorites, setFavorites] = useState<string[]>([]);
   const [isShared, setIsShared] = useState(false);
-  const [shareCode, setShareCode] = useState('');
   const [loadingLogs, setLoadingLogs] = useState<string | null>(null);
 
   const masterMap = useMemo(() => masterCases.reduce((acc: any, tc) => {
@@ -86,14 +92,41 @@ export default function PlaywrightDashboard() {
   const loadData = useCallback(async (initial = false) => {
     try {
       if (initial) setLoading(true);
-      const [history, master, trend] = await Promise.all([getBuildHistory(), getMasterTestCases(), getPlaywrightTrend()]);
-      const pwBuilds = history.filter((b: any) => b.type?.toLowerCase() === 'playwright');
+      
+      // 1. Fetch data
+      const [history, master, trend] = await Promise.all([
+        getBuildHistory(), 
+        getMasterTestCases(), 
+        getPlaywrightTrend(Number(projectId)) 
+      ]);
+  
+      // 2. Handle Build History
+      const pwBuilds = Array.isArray(history) 
+        ? history.filter((b: any) => b.type?.toLowerCase() === 'playwright')
+        : [];
       setBuilds(pwBuilds);
       setMasterCases(master);
-      setTrendData(trend);
-      if (pwBuilds.length && !selectedBuildId) setSelectedBuildId(pwBuilds[0].id);
-    } catch (e) { console.error(e); } finally { if (initial) setLoading(false); }
-  }, [selectedBuildId]);
+  
+      // 3. FIX: Handle Trend Data specifically to avoid the TypeScript error
+      if (Array.isArray(trend)) {
+        setTrendData(trend);
+      } else {
+        console.error("Trend data fetch failed:", trend);
+        setTrendData([]); // Set to empty array if there's an error object
+      }
+      
+      if (pwBuilds.length && !selectedBuildId) {
+        // If a buildId is in URL, use it, otherwise use the latest
+        const urlBuildId = searchParams.get('buildId');
+        setSelectedBuildId(urlBuildId ? Number(urlBuildId) : pwBuilds[0].id);
+      }
+      
+    } catch (e) { 
+      console.error(e); 
+    } finally { 
+      if (initial) setLoading(false); 
+    }
+  }, [selectedBuildId, projectId, searchParams]);
 
   useEffect(() => {
     if (!selectedBuildId) return;
@@ -166,10 +199,7 @@ export default function PlaywrightDashboard() {
 
   return (
     <div className="flex h-screen bg-[#0c0c0e] text-zinc-300 font-sans selection:bg-indigo-500/30 overflow-hidden">
-      
-      {/* MAIN CONTENT - Expansion to full width */}
       <main className="flex-1 overflow-y-auto p-8 space-y-8 bg-[#0c0c0e] custom-scrollbar">
-        {/* AWS HEADER */}
         <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-zinc-800 pb-8">
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-zinc-500">
@@ -194,7 +224,6 @@ export default function PlaywrightDashboard() {
           </div>
         </header>
 
-        {/* STATS GRID */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard title="Throughput" value={currentStats.total} sub="Active Scenarios" icon={<Shield size={18}/>} color="indigo" />
           <StatCard title="Reliability" value={currentStats.passed} sub="Success Vector" icon={<CheckCircle2 size={18}/>} color="emerald" />
@@ -202,7 +231,6 @@ export default function PlaywrightDashboard() {
           <StatCard title="Build Health" value={`${analysis.cRate}%`} sub="Stability Index" icon={<Zap size={18}/>} trend={analysis.diff} color="zinc" />
         </div>
 
-        {/* CHARTS SECTION */}
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           <div className="xl:col-span-2 bg-[#111114] border border-zinc-800 rounded-sm shadow-sm flex flex-col">
             <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
@@ -249,7 +277,6 @@ export default function PlaywrightDashboard() {
           </div>
         </div>
 
-        {/* FILTERS PANEL */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="flex items-center gap-2 bg-[#111114] border border-zinc-800 p-2 rounded-sm shadow-sm overflow-x-auto scrollbar-hide">
             <FilterButton active={filterStatus === 'all'} label="TOTAL" count={currentStats.total} onClick={() => setFilterStatus('all')} color="zinc" />
@@ -263,7 +290,6 @@ export default function PlaywrightDashboard() {
           </div>
         </div>
 
-        {/* RESULTS LIST */}
         <div className="space-y-12 pb-40">
           {Object.entries(normalizedTests.reduce((acc: any, t: any) => {
             if ((filterStatus === 'all' || t.status === filterStatus) && t.project.toLowerCase().includes(projectSearch.toLowerCase())) {
@@ -286,9 +312,6 @@ export default function PlaywrightDashboard() {
                   return (
                     <div key={uiId} className="relative group hover:bg-white/[0.01] transition-colors">
                       <TestRow test={t} masterMap={masterMap} isExpanded={expandedTests.includes(uiId)} isLoadingLogs={loadingLogs === uiId} onToggle={() => toggleTestLogs(uiId, t.id, t.title)} />
-                      <button onClick={() => toggleFavorite(uiId)} className={cn("absolute right-24 top-7 transition-all opacity-0 group-hover:opacity-100", favorites.includes(uiId) ? "text-yellow-500 opacity-100" : "text-zinc-700 hover:text-yellow-500")}>
-                        <Star size={16} fill={favorites.includes(uiId) ? "currentColor" : "none"} />
-                      </button>
                     </div>
                   );
                 })}
@@ -298,6 +321,21 @@ export default function PlaywrightDashboard() {
         </div>
       </main>
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                               MAIN EXPORT                                  */
+/* -------------------------------------------------------------------------- */
+export default function PlaywrightDashboard() {
+  return (
+    <Suspense fallback={
+        <div className="h-screen flex flex-col items-center justify-center bg-[#09090b]">
+            <Loader2 className="w-8 h-8 text-zinc-500 animate-spin" />
+        </div>
+    }>
+      <PlaywrightDashboardContent />
+    </Suspense>
   );
 }
 
