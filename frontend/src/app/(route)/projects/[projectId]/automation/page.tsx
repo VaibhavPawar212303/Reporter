@@ -17,14 +17,24 @@ export default function ProjectAutomationPage() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // 1. Get Project Details first to identify the instance type (Cypress/Playwright)
+        // 1. Get Project Details
         const proj = await getProjectById(Number(projectId));
-        setProject(proj);
+        
+        // Check if proj is valid and not an error object
+        if (proj && !('error' in proj)) {
+          setProject(proj);
 
-        if (proj) {
           // 2. Fetch builds matching the specific Project ID and its defined Type
           const bld = await getBuildsByProjectAndType(Number(projectId), proj.type);
-          setBuilds(bld);
+
+          // --- FIX START: Type narrowing check ---
+          if (Array.isArray(bld)) {
+            setBuilds(bld);
+          } else {
+            console.error("Fetch builds error:", bld.error);
+            setBuilds([]); // Fallback to empty array if error occurs
+          }
+          // --- FIX END ---
         }
       } catch (error) {
         console.error("Critical Registry Fetch Error:", error);
@@ -73,7 +83,6 @@ export default function ProjectAutomationPage() {
 
       {/* 2. AUTOMATION BUILD LIST (Registry UI) */}
       <div className="bg-[#111114] border border-zinc-800 shadow-2xl flex flex-col">
-        {/* Sub-header */}
         <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
           <div className="flex items-center gap-3">
              <Activity size={14} className="text-indigo-500" />
@@ -86,17 +95,14 @@ export default function ProjectAutomationPage() {
           </span>
         </div>
 
-        {/* List mapping */}
         <div className="divide-y divide-zinc-800/50">
           {builds.map((b) => (
             <div 
-              key={`build-${b.id}`} // Unique key fix
-              // Route directly to the dashboard with params
+              key={`build-${b.id}`} 
               onClick={() => router.push(`/${project.type.toLowerCase()}?projectId=${projectId}&buildId=${b.id}`)}
               className="group flex items-center justify-between p-6 hover:bg-white/[0.02] transition-all cursor-pointer relative overflow-hidden"
             >
               <div className="flex items-center gap-6">
-                {/* Vertical Status Health Strip (Matches Projects UI) */}
                 <div className={cn(
                   "w-1 h-10 transition-all duration-500",
                   b.status === 'passed' ? "bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.3)]" : 
@@ -117,7 +123,6 @@ export default function ProjectAutomationPage() {
                 </div>
               </div>
 
-              {/* Action and Status Area */}
               <div className="flex items-center gap-12">
                 <div className="hidden md:block text-right">
                     <p className="text-[8px] font-black text-zinc-700 uppercase tracking-widest mb-1">Architecture</p>
@@ -133,7 +138,6 @@ export default function ProjectAutomationPage() {
             </div>
           ))}
           
-          {/* Empty State */}
           {builds.length === 0 && (
             <div className="p-32 flex flex-col items-center justify-center text-center opacity-40">
               <Box size={32} className="text-zinc-800 mb-4" />
@@ -145,7 +149,6 @@ export default function ProjectAutomationPage() {
         </div>
       </div>
 
-      {/* Footer System Info */}
       <footer className="flex justify-between items-center px-2 opacity-30">
         <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest underline">Auth_Node: Secure</p>
         <p className="text-[9px] text-zinc-500 font-mono">Registry_Sync: Last_Check_Now</p>
