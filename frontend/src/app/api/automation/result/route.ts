@@ -1,7 +1,10 @@
+// src/app/api/automation/result/route.ts
 import { NextResponse } from 'next/server';
 import { eq, and } from 'drizzle-orm';
+import { auth } from '@clerk/nextjs/server';
 import { db } from '../../../../../db';
-import { testResults } from '../../../../../db/schema';
+import { automationBuilds, organizationMembers, testResults } from '../../../../../db/schema';
+
 
 const DEBUG_MODE = true;
 
@@ -46,11 +49,13 @@ async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   while (locks.has(key)) {
     await locks.get(key);
   }
-  
+
   let resolve: () => void;
-  const promise = new Promise<void>(r => { resolve = r; });
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
   locks.set(key, promise);
-  
+
   try {
     return await fn();
   } finally {
@@ -61,8 +66,14 @@ async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 
 export async function POST(req: Request) {
   const requestId = `REQ-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-  
+
   try {
+    const { userId } = await auth();
+
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await req.json();
 
     const validation = validatePayload(body);
@@ -70,16 +81,42 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: validation.error }, { status: 400 });
     }
 
+    // Get user's organization
+    const membership = await db.query.organizationMembers.findFirst({
+      where: eq(organizationMembers.userId, userId),
+    });
+
+    if (!membership) {
+      return NextResponse.json({ error: 'No organization found' }, { status: 404 });
+    }
+
     const build_id = typeof body.build_id === 'string' ? parseInt(body.build_id, 10) : body.build_id;
     const { spec_file, test_entry, unique_test_key } = body;
     const testUniqueKey = unique_test_key || getUniqueTestKey(test_entry);
     const isFinal = test_entry?.is_final === true;
-    
+
+    // Verify build belongs to user's organization
+    const build = await db.query.automationBuilds.findFirst({
+      where: and(
+        eq(automationBuilds.id, build_id),
+        eq(automationBuilds.organizationId, membership.organizationId)
+      ),
+    });
+
+    if (!build) {
+      return NextResponse.json({ error: 'Build not found or access denied' }, { status: 404 });
+    }
+
     const lockKey = `${build_id}:${spec_file}`;
 
     debugLog(`INCOMING [${requestId}]`, {
-      build_id, spec_file, testUniqueKey, isFinal,
-      status: test_entry?.status
+      build_id,
+      spec_file,
+      testUniqueKey,
+      isFinal,
+      status: test_entry?.status,
+      userId,
+      organizationId: membership.organizationId,
     });
 
     return await withLock(lockKey, async () => {
@@ -89,14 +126,14 @@ export async function POST(req: Request) {
           where: and(
             eq(testResults.buildId, build_id),
             eq(testResults.specFile, spec_file)
-          )
+          ),
         });
 
         let tests: any[] = existing ? [...(existing.tests as any[])] : [];
 
         debugLog(`EXISTING TESTS [${requestId}]`, {
           count: tests.length,
-          keys: tests.map(t => `${t.project}::${t.title}`)
+          keys: tests.map((t) => `${t.project}::${t.title}`),
         });
 
         // 2. Find test by unique key
@@ -115,7 +152,7 @@ export async function POST(req: Request) {
             success: true,
             skipped: true,
             reason: 'Final result already exists',
-            data: { build_id: String(build_id), spec_file, test_key: testUniqueKey }
+            data: { build_id: String(build_id), spec_file, test_key: testUniqueKey },
           });
         }
 
@@ -137,7 +174,7 @@ export async function POST(req: Request) {
 
         if (testIdx !== -1 && test_entry) {
           const normalizedStatus = normalizeStatus(test_entry.status);
-          
+
           tests[testIdx] = {
             ...tests[testIdx],
             ...test_entry,
@@ -148,12 +185,14 @@ export async function POST(req: Request) {
             duration_seconds: test_entry.duration_seconds || '0',
             steps: test_entry.steps || tests[testIdx].steps || [],
             attachments: test_entry.attachments || tests[testIdx].attachments,
-            error: test_entry.error ? {
-              message: cleanText(test_entry.error.message),
-              stack: cleanText(test_entry.error.stack),
-              location: test_entry.error.location,
-            } : tests[testIdx].error,
-            case_codes: test_entry.case_codes || ["N/A"],
+            error: test_entry.error
+              ? {
+                  message: cleanText(test_entry.error.message),
+                  stack: cleanText(test_entry.error.stack),
+                  location: test_entry.error.location,
+                }
+              : tests[testIdx].error,
+            case_codes: test_entry.case_codes || ['N/A'],
             run_number: test_entry.run_number || 1,
             retry_count: test_entry.retry_count || 0,
             is_flaky: test_entry.is_flaky || false,
@@ -161,38 +200,37 @@ export async function POST(req: Request) {
             metadata: test_entry.metadata,
             updated_at: new Date().toISOString(),
           };
-          
+
           debugLog(`UPDATED [${requestId}]`, {
             testUniqueKey,
             status: normalizedStatus,
-            is_final: isFinal
+            is_final: isFinal,
           });
         }
 
         debugLog(`SAVING [${requestId}]`, {
           totalTests: tests.length,
-          tests: tests.map(t => ({
+          tests: tests.map((t) => ({
             key: t.unique_key || `${t.project}::${t.title}`,
             status: t.status,
-            is_final: t.is_final
-          }))
+            is_final: t.is_final,
+          })),
         });
 
         // 5. Save to database
         if (existing) {
-          await tx.update(testResults)
+          await tx
+            .update(testResults)
             .set({ tests: tests as any })
-            .where(and(
-              eq(testResults.buildId, build_id),
-              eq(testResults.specFile, spec_file)
-            ));
+            .where(and(eq(testResults.buildId, build_id), eq(testResults.specFile, spec_file)));
         } else {
-          await tx.insert(testResults)
-            .values({
-              buildId: build_id as any,
-              specFile: spec_file,
-              tests: tests as any,
-            });
+          await tx.insert(testResults).values({
+            buildId: build_id as any,
+            projectId: build.projectId,
+            organizationId: membership.organizationId,
+            specFile: spec_file,
+            tests: tests as any,
+          });
         }
 
         // 6. Calculate stats for response
@@ -219,48 +257,75 @@ export async function POST(req: Request) {
             final_count: finalTests.length,
             passed: stats.passed,
             failed: stats.failed,
-          }
+          },
         });
       });
     });
-
   } catch (error: any) {
     console.error(`❌ [${requestId}] Error:`, error);
-    return NextResponse.json(
-      { error: error.message || 'Internal server error', requestId },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error.message || 'Internal server error', requestId }, { status: 500 });
   }
 }
 
 export async function GET(req: Request) {
   try {
+    const { userId } = await auth();
+
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Get user's organization
+    const membership = await db.query.organizationMembers.findFirst({
+      where: eq(organizationMembers.userId, userId),
+    });
+
+    if (!membership) {
+      return NextResponse.json({ error: 'No organization found' }, { status: 404 });
+    }
+
     const { searchParams } = new URL(req.url);
     const build_id_param = searchParams.get('build_id');
+    const project_id_param = searchParams.get('project_id');
     const only_final = searchParams.get('only_final') === 'true';
     const debug = searchParams.get('debug') === 'true';
 
-    if (!build_id_param) {
-      return NextResponse.json({ error: 'Missing build_id' }, { status: 400 });
+    // Build query conditions - always filter by organization
+    const conditions = [eq(testResults.organizationId, membership.organizationId)];
+
+    if (build_id_param) {
+      const build_id = parseInt(build_id_param, 10);
+      if (isNaN(build_id)) {
+        return NextResponse.json({ error: 'Invalid build_id' }, { status: 400 });
+      }
+      conditions.push(eq(testResults.buildId, build_id));
     }
 
-    const build_id = parseInt(build_id_param, 10);
-    if (isNaN(build_id)) {
-      return NextResponse.json({ error: 'Invalid build_id' }, { status: 400 });
+    if (project_id_param) {
+      const project_id = parseInt(project_id_param, 10);
+      if (isNaN(project_id)) {
+        return NextResponse.json({ error: 'Invalid project_id' }, { status: 400 });
+      }
+      conditions.push(eq(testResults.projectId, project_id));
     }
 
     const results = await db.query.testResults.findMany({
-      where: eq(testResults.buildId, build_id)
+      where: and(...conditions),
+      with: {
+        build: true,
+        project: true,
+      },
+      orderBy: (results, { desc }) => [desc(results.executedAt)],
     });
 
     // Flatten and deduplicate
     const allTestsMap = new Map<string, any>();
-    
+
     results.forEach((r: any) => {
       (r.tests as any[])?.forEach((t: any) => {
         const key = t.unique_key || `${t.project}::${t.title}`;
         const existing = allTestsMap.get(key);
-        
+
         // Priority: is_final=true wins
         if (!existing || (t.is_final && !existing.is_final)) {
           allTestsMap.set(key, { ...t, unique_key: key });
@@ -269,17 +334,17 @@ export async function GET(req: Request) {
     });
 
     let allTests = Array.from(allTestsMap.values());
-    
+
     if (only_final) {
-      allTests = allTests.filter(t => t.is_final === true);
+      allTests = allTests.filter((t) => t.is_final === true);
     }
 
     const summary = {
       total: allTests.length,
-      final: allTests.filter(t => t.is_final).length,
-      passed: allTests.filter(t => t.is_final && t.status === 'PASSED').length,
-      failed: allTests.filter(t => t.is_final && t.status === 'FAILED').length,
-      running: allTests.filter(t => !t.is_final).length,
+      final: allTests.filter((t) => t.is_final).length,
+      passed: allTests.filter((t) => t.is_final && t.status === 'PASSED').length,
+      failed: allTests.filter((t) => t.is_final && t.status === 'FAILED').length,
+      running: allTests.filter((t) => !t.is_final).length,
     };
 
     return NextResponse.json({
@@ -290,15 +355,14 @@ export async function GET(req: Request) {
       summary,
       ...(debug && {
         debug: {
-          raw: allTests.map(t => ({
+          raw: allTests.map((t) => ({
             key: t.unique_key,
             status: t.status,
-            is_final: t.is_final
-          }))
-        }
-      })
+            is_final: t.is_final,
+          })),
+        },
+      }),
     });
-
   } catch (error: any) {
     console.error('❌ GET Error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });

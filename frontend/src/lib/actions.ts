@@ -1,52 +1,229 @@
 "use server"
 
-import { and, desc, eq, inArray ,sql} from 'drizzle-orm';
-import { automationBuilds, projects, testCases, testResults } from '../../db/schema';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { automationBuilds, organizationMembers, projects, testCases, testResults } from '../../db/schema';
 import { revalidatePath } from "next/cache";
 import { db } from '../../db';
+import { auth } from '@clerk/nextjs/server';
 
 
-export async function uploadMasterTestCases(data: any[]) {
+
+export async function uploadMasterTestCases(data: any[], projectId: number) {
   try {
-    for (const item of data) {
-      const code = item["Case code"] || item.caseCode;
-      const title = item["Title"] || item.title;
+    const { userId } = await auth();
 
-      if (!code || !title) continue;
-
-      await db.insert(testCases)
-        .values({
-          caseCode: String(code),
-          caseKey: String(item["Case API Key"] || item["Case Key"] || ''),
-          moduleName: String(item["ModuleName"] || item["Module Name"] || ''),
-          testSuite: String(item["Test Suite"] || ''),
-          title: String(title),
-          description: String(item["Description"] || ''),
-          precondition: String(item["Precondition"] || ''),
-          steps: String(item["Steps"] || ''),
-          expectedResult: String(item["ExpectedResult"] || ''),
-          type: String(item["Type"] || ''),
-          priority: String(item["Priorities"] || item.priority || 'medium'),
-          mode: String(item["Mode"] || 'Automation'),
-          loggedUser: String(item["Logged User"] || `${item.FirstName || ''} ${item.LastName || ''}`.trim()),
-          tags: String(item["Tags"] || ''),
-        })
-        .onDuplicateKeyUpdate({
-          set: {
-            title: String(title),
-            moduleName: String(item["ModuleName"] || item["Module Name"] || ''),
-            steps: String(item["Steps"] || ''),
-            expectedResult: String(item["ExpectedResult"] || ''),
-            priority: String(item["Priorities"] || item.priority || 'medium'),
-            updatedAt: new Date()
-          }
-        });
+    if (!userId) {
+      return { error: 'Unauthorized' };
     }
+
+    // Get user's organization
+    const membership = await db.query.organizationMembers.findFirst({
+      where: eq(organizationMembers.userId, userId),
+    });
+
+    if (!membership) {
+      return { error: 'No organization found' };
+    }
+
+    // Verify project belongs to user's organization
+    const project = await db.query.projects.findFirst({
+      where: and(
+        eq(projects.id, projectId),
+        eq(projects.organizationId, membership.organizationId)
+      ),
+    });
+
+    if (!project) {
+      return { error: 'Project not found or access denied' };
+    }
+
+    let inserted = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    for (const item of data) {
+      const code = item['Case code'] || item.caseCode;
+      const title = item['Title'] || item.title;
+
+      if (!code || !title) {
+        skipped++;
+        continue;
+      }
+
+      // Check if test case already exists for this org
+      const existing = await db.query.testCases.findFirst({
+        where: and(
+          eq(testCases.organizationId, membership.organizationId),
+          eq(testCases.caseCode, String(code))
+        ),
+      });
+
+      if (existing) {
+        // Update existing test case
+        await db
+          .update(testCases)
+          .set({
+            title: String(title),
+            moduleName: String(item['ModuleName'] || item['Module Name'] || ''),
+            testSuite: String(item['Test Suite'] || ''),
+            description: String(item['Description'] || ''),
+            precondition: String(item['Precondition'] || ''),
+            steps: String(item['Steps'] || ''),
+            expectedResult: String(item['ExpectedResult'] || ''),
+            type: String(item['Type'] || ''),
+            priority: String(item['Priorities'] || item.priority || 'medium'),
+            mode: String(item['Mode'] || 'Automation'),
+            tags: String(item['Tags'] || ''),
+          })
+          .where(eq(testCases.id, existing.id));
+        updated++;
+      } else {
+        // Insert new test case
+        await db.insert(testCases).values({
+          projectId: projectId,
+          organizationId: membership.organizationId,
+          caseCode: String(code),
+          caseKey: String(item['Case API Key'] || item['Case Key'] || ''),
+          moduleName: String(item['ModuleName'] || item['Module Name'] || ''),
+          testSuite: String(item['Test Suite'] || ''),
+          title: String(title),
+          description: String(item['Description'] || ''),
+          precondition: String(item['Precondition'] || ''),
+          steps: String(item['Steps'] || ''),
+          expectedResult: String(item['ExpectedResult'] || ''),
+          type: String(item['Type'] || ''),
+          priority: String(item['Priorities'] || item.priority || 'medium'),
+          mode: String(item['Mode'] || 'Automation'),
+          createdById: userId,
+          tags: String(item['Tags'] || ''),
+        });
+        inserted++;
+      }
+    }
+
     revalidatePath('/test-cases');
     revalidatePath('/');
-    return { success: true };
+    revalidatePath(`/projects/${projectId}`);
+
+    return {
+      success: true,
+      stats: {
+        total: data.length,
+        inserted,
+        updated,
+        skipped,
+      },
+    };
   } catch (e: any) {
-    console.error("❌ TiDB Insert Error:", e);
+    console.error('❌ TiDB Insert Error:', e);
+    return { error: e.message };
+  }
+}
+
+// Alternative: Bulk insert with onDuplicateKeyUpdate (faster for large datasets)
+export async function uploadMasterTestCasesBulk(data: any[], projectId: number) {
+  try {
+    const { userId } = await auth();
+
+    if (!userId) {
+      return { error: 'Unauthorized' };
+    }
+
+    // Get user's organization
+    const membership = await db.query.organizationMembers.findFirst({
+      where: eq(organizationMembers.userId, userId),
+    });
+
+    if (!membership) {
+      return { error: 'No organization found' };
+    }
+
+    // Verify project belongs to user's organization
+    const project = await db.query.projects.findFirst({
+      where: and(
+        eq(projects.id, projectId),
+        eq(projects.organizationId, membership.organizationId)
+      ),
+    });
+
+    if (!project) {
+      return { error: 'Project not found or access denied' };
+    }
+
+    // Filter valid entries
+    const validEntries = data.filter((item) => {
+      const code = item['Case code'] || item.caseCode;
+      const title = item['Title'] || item.title;
+      return code && title;
+    });
+
+    // Process in batches of 100
+    const batchSize = 100;
+    let processed = 0;
+
+    for (let i = 0; i < validEntries.length; i += batchSize) {
+      const batch = validEntries.slice(i, i + batchSize);
+
+      await Promise.all(
+        batch.map((item) => {
+          const code = item['Case code'] || item.caseCode;
+          const title = item['Title'] || item.title;
+
+          return db
+            .insert(testCases)
+            .values({
+              projectId: projectId,
+              organizationId: membership.organizationId,
+              caseCode: String(code),
+              caseKey: String(item['Case API Key'] || item['Case Key'] || ''),
+              moduleName: String(item['ModuleName'] || item['Module Name'] || ''),
+              testSuite: String(item['Test Suite'] || ''),
+              title: String(title),
+              description: String(item['Description'] || ''),
+              precondition: String(item['Precondition'] || ''),
+              steps: String(item['Steps'] || ''),
+              expectedResult: String(item['ExpectedResult'] || ''),
+              type: String(item['Type'] || ''),
+              priority: String(item['Priorities'] || item.priority || 'medium'),
+              mode: String(item['Mode'] || 'Automation'),
+              createdById: userId,
+              tags: String(item['Tags'] || ''),
+            })
+            .onDuplicateKeyUpdate({
+              set: {
+                title: String(title),
+                moduleName: String(item['ModuleName'] || item['Module Name'] || ''),
+                testSuite: String(item['Test Suite'] || ''),
+                description: String(item['Description'] || ''),
+                precondition: String(item['Precondition'] || ''),
+                steps: String(item['Steps'] || ''),
+                expectedResult: String(item['ExpectedResult'] || ''),
+                type: String(item['Type'] || ''),
+                priority: String(item['Priorities'] || item.priority || 'medium'),
+                mode: String(item['Mode'] || 'Automation'),
+                tags: String(item['Tags'] || ''),
+              },
+            });
+        })
+      );
+
+      processed += batch.length;
+    }
+
+    revalidatePath('/test-cases');
+    revalidatePath('/');
+    revalidatePath(`/projects/${projectId}`);
+
+    return {
+      success: true,
+      stats: {
+        total: data.length,
+        processed,
+        skipped: data.length - validEntries.length,
+      },
+    };
+  } catch (e: any) {
+    console.error('❌ TiDB Insert Error:', e);
     return { error: e.message };
   }
 }
@@ -71,10 +248,10 @@ export async function updateTestCase(id: number, data: any) {
 export async function getDashboardStats() {
   const builds = await db.select().from(automationBuilds).orderBy(desc(automationBuilds.id)).limit(50);
   const totalRequirements = await db.select({ count: sql<number>`count(*)` }).from(testCases);
-  
+
   // Fetch results for these specific builds only to save RUs
   const buildIds = builds.map(b => b.id);
-  const results = buildIds.length > 0 
+  const results = buildIds.length > 0
     ? await db.select().from(testResults).where(inArray(testResults.buildId, buildIds))
     : [];
 
@@ -125,7 +302,7 @@ export async function getBuildDetails(buildId: number) {
     if (!build) return null;
 
     const results = await db.select().from(testResults).where(eq(testResults.buildId, buildId));
-    
+
     return {
       ...build,
       results: results.map(r => ({
@@ -141,22 +318,22 @@ export async function getBuildDetails(buildId: number) {
 export async function getTestSteps(specId: number, testTitle: string) {
   try {
     // Query the testResults table with the specId
-    const testResult = await db.query.testResults.findFirst({ 
-      where: eq(testResults.id, specId) 
+    const testResult = await db.query.testResults.findFirst({
+      where: eq(testResults.id, specId)
     });
-    
+
     if (!testResult) return null;
-    
+
     // Parse the tests if it's stored as JSON string
-    const testsArray = typeof testResult.tests === 'string' 
-      ? JSON.parse(testResult.tests) 
+    const testsArray = typeof testResult.tests === 'string'
+      ? JSON.parse(testResult.tests)
       : testResult.tests;
-    
+
     // Find the test by title in the tests array
     const test = (testsArray as any[]).find((t: any) => t.title === testTitle);
-    
+
     if (!test) return null;
-    
+
     return {
       steps: test.steps || [],
       logs: test.logs || [],
@@ -173,22 +350,22 @@ export async function getTestSteps(specId: number, testTitle: string) {
 export async function getCypressTestSteps(specId: number, testTitle: string) {
   try {
     // 1. Query the testResults table using the specId (Primary Key)
-    const testResult = await db.query.testResults.findFirst({ 
-      where: eq(testResults.id, specId) 
+    const testResult = await db.query.testResults.findFirst({
+      where: eq(testResults.id, specId)
     });
     console.log(testResult)
     if (!testResult) return null;
-    
+
     // 2. Handle TiDB JSON parsing (Drizzle usually returns an object, but we check for safety)
-    const testsArray = typeof testResult.tests === 'string' 
-      ? JSON.parse(testResult.tests) 
+    const testsArray = typeof testResult.tests === 'string'
+      ? JSON.parse(testResult.tests)
       : testResult.tests;
-    
+
     // 3. Find the specific test by title in the Cypress results array
     const test = (testsArray as any[]).find((t: any) => t.title === testTitle);
-    
+
     if (!test) return null;
-    
+
     /**
      * 4. Return Cypress Mapped Data
      * - steps: The command log (cy.visit, cy.get, etc)
@@ -199,7 +376,7 @@ export async function getCypressTestSteps(specId: number, testTitle: string) {
       steps: test.steps || [],
       logs: test.logs || [],
       // Cypress often uses 'logs' for all terminal output
-      stdout_logs: test.logs || [], 
+      stdout_logs: test.logs || [],
       stderr_logs: test.stderr_logs || [],
       error: test.error || null,
       video_url: test.video_url || null, // URL from Catbox/Litterbox
@@ -216,7 +393,7 @@ export async function getMasterTestCases() {
 export async function getCypressGlobalStats() {
   try {
     const builds = await db.select().from(automationBuilds).where(eq(automationBuilds.type, 'cypress'));
-    
+
     // Fetch all test results for Cypress builds
     const results = await db.select({ tests: testResults.tests })
       .from(testResults)
@@ -233,10 +410,10 @@ export async function getCypressGlobalStats() {
     });
 
     // ✅ Match the naming expected by the frontend
-    return { 
-      totalBuilds: builds.length || 0, 
-      totalTestsExecuted: totalTests || 0, 
-      lifetimePassRate: totalTests > 0 ? Math.round((passedTests / totalTests) * 100) : 0 
+    return {
+      totalBuilds: builds.length || 0,
+      totalTestsExecuted: totalTests || 0,
+      lifetimePassRate: totalTests > 0 ? Math.round((passedTests / totalTests) * 100) : 0
     };
   } catch (error) {
     console.error("Global Stats Error:", error);
@@ -260,7 +437,7 @@ export async function getCypressBuildDetails(buildId: number) {
     const enrichedResults = results.map(r => {
       // TiDB returns the JSON column as a live JavaScript array
       const tests = (r.tests as any[]) || [];
-      
+
       const specPassed = tests.filter(t => t.status === 'passed').length;
       const specFailed = tests.filter(t => t.status === 'failed').length;
       const specPending = tests.filter(t => ['pending', 'skipped'].includes(t.status)).length;
@@ -282,8 +459,8 @@ export async function getCypressBuildDetails(buildId: number) {
           passed: specPassed,
           failed: specFailed,
           pending: specPending,
-          duration: totalDurationMs > 1000 
-            ? (totalDurationMs / 1000).toFixed(2) + "s" 
+          duration: totalDurationMs > 1000
+            ? (totalDurationMs / 1000).toFixed(2) + "s"
             : totalDurationMs + "ms"
         },
         // Environment Details for this specific worker/spec
@@ -389,21 +566,46 @@ export async function getAutomationTrend() {
     return trendData;
   } catch (e) { return []; }
 }
-export async function createProject(formData: { name: string, type: string, environment: string, description?: string }) {
+export async function createProject(formData: {
+  name: string;
+  type: string;
+  environment: string;
+  description?: string;
+}) {
   try {
+    const { userId } = await auth();
+
+    if (!userId) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    // Get user's organization
+    const membership = await db.query.organizationMembers.findFirst({
+      where: eq(organizationMembers.userId, userId),
+    });
+
+    if (!membership) {
+      return { success: false, error: 'No organization found' };
+    }
+
     const res = await db.insert(projects).values({
+      organizationId: membership.organizationId,
       name: formData.name.toUpperCase(),
       type: formData.type.toLowerCase(),
       environment: formData.environment.toLowerCase(),
       description: formData.description || '',
     });
-    // This refreshes the Project Registry page automatically
+
+    const insertedId = (res as any).lastInsertId || (res as any)[0]?.insertId;
+
+    // Revalidate paths
     revalidatePath('/projects');
-    //@ts-ignore
-    return { success: true, id: res[0].insertId };
-  } catch (error) {
-    console.error("Project Creation Error:", error);
-    return { success: false, error: "Failed to register project" };
+    revalidatePath('/dashboard');
+
+    return { success: true, id: insertedId };
+  } catch (error: any) {
+    console.error('Project Creation Error:', error);
+    return { success: false, error: error.message || 'Failed to register project' };
   }
 }
 export async function getProjects() {
@@ -420,12 +622,12 @@ export async function getProjects() {
 
   // Map to add UI colors based on the image provided
   const colors = ["indigo", "amber", "emerald"];
-  
+
   return result.map((p, index) => ({
     ...p,
     color: colors[index % colors.length],
     // Coverage logic placeholder: (Actual results logic can be added later)
-    coverage: p.totalCases > 0 ? "100%" : "0%" 
+    coverage: p.totalCases > 0 ? "100%" : "0%"
   }));
 }
 export async function getProjectById(id: number) {
@@ -449,23 +651,85 @@ export async function getTestCasesByProject(projectId: number) {
     .where(eq(testCases.projectId, projectId))
     .orderBy(desc(testCases.createdAt));
 }
-export async function createTestCase(data: any) {
+export async function createTestCase(data: {
+  projectId: number;
+  caseCode: string;
+  title: string;
+  moduleName?: string;
+  priority?: string;
+  steps?: string;
+  expectedResult?: string;
+  description?: string;
+  precondition?: string;
+  testSuite?: string;
+  tags?: string;
+}) {
   try {
-    await db.insert(testCases).values({
+    const { userId } = await auth();
+
+    if (!userId) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    // Get user's organization
+    const membership = await db.query.organizationMembers.findFirst({
+      where: eq(organizationMembers.userId, userId),
+    });
+
+    if (!membership) {
+      return { success: false, error: 'No organization found' };
+    }
+
+    // Verify project belongs to user's organization
+    const project = await db.query.projects.findFirst({
+      where: and(
+        eq(projects.id, Number(data.projectId)),
+        eq(projects.organizationId, membership.organizationId)
+      ),
+    });
+
+    if (!project) {
+      return { success: false, error: 'Project not found or access denied' };
+    }
+
+    // Check if case code already exists in this organization
+    const existingCase = await db.query.testCases.findFirst({
+      where: and(
+        eq(testCases.organizationId, membership.organizationId),
+        eq(testCases.caseCode, data.caseCode.toUpperCase())
+      ),
+    });
+
+    if (existingCase) {
+      return { success: false, error: 'Case code already exists' };
+    }
+
+    const res = await db.insert(testCases).values({
       projectId: Number(data.projectId),
+      organizationId: membership.organizationId,
+      createdById: userId,
       caseCode: data.caseCode.toUpperCase(),
       title: data.title,
       moduleName: data.moduleName || 'GENERAL',
       priority: data.priority || 'medium',
-      steps: data.steps,
-      expectedResult: data.expectedResult,
-      type: 'manual'
+      steps: data.steps || '',
+      expectedResult: data.expectedResult || '',
+      description: data.description || '',
+      precondition: data.precondition || '',
+      testSuite: data.testSuite || '',
+      tags: data.tags || '',
+      type: 'manual',
     });
-    
+
+    const insertedId = (res as any).lastInsertId || (res as any)[0]?.insertId;
+
+    revalidatePath(`/projects/${data.projectId}`);
     revalidatePath(`/projects/${data.projectId}/manual`);
-    return { success: true };
+    revalidatePath('/test-cases');
+
+    return { success: true, id: insertedId };
   } catch (error: any) {
-    console.error("DB Error:", error);
+    console.error('DB Error:', error);
     return { success: false, error: error.message };
   }
 }
@@ -492,7 +756,7 @@ export async function importTestCases(projectId: number, dataArray: any[]) {
 
       return {
         projectId: Number(projectId),
-        
+
         // Mapping based on your provided JSON structure
         caseCode: forceSlice(find('caseCode') || find('id'), 100) || `TC-AUTO-${Date.now()}-${index}`,
         caseKey: forceSlice(find('caseKey'), 100),
@@ -505,10 +769,10 @@ export async function importTestCases(projectId: number, dataArray: any[]) {
         description: find('description') ? String(find('description')) : null,
         precondition: find('precondition') ? String(find('precondition')) : null,
         steps: find('steps') ? String(find('steps')) : null,
-        
+
         // SUCCESS: Mapped to 'ExpectedResult' from your JSON
-        expectedResult: rawExpected ? String(rawExpected) : null, 
-        
+        expectedResult: rawExpected ? String(rawExpected) : null,
+
         tags: find('tags') ? String(find('tags')) : null,
         shareableLink: rawLink ? String(rawLink) : null,
 
@@ -519,10 +783,10 @@ export async function importTestCases(projectId: number, dataArray: any[]) {
     });
 
     // Chunking for performance (TiDB/MySQL)
-    const chunkSize = 50; 
+    const chunkSize = 50;
     for (let i = 0; i < formattedData.length; i += chunkSize) {
       const chunk = formattedData.slice(i, i + chunkSize);
-      
+
       await db.insert(testCases)
         .values(chunk as any)
         .onDuplicateKeyUpdate({
@@ -543,7 +807,7 @@ export async function importTestCases(projectId: number, dataArray: any[]) {
           }
         });
     }
-    
+
     revalidatePath(`/projects/${projectId}/manual`);
     return { success: true, count: formattedData.length };
 
@@ -554,7 +818,7 @@ export async function importTestCases(projectId: number, dataArray: any[]) {
 }
 export async function getProjectManualStats(projectId: number) {
   const allCases = await db.select().from(testCases).where(eq(testCases.projectId, projectId));
-  
+
   // Group by Module
   const modules = allCases.reduce((acc: any, tc) => {
     const mod = tc.moduleName || "UNASSIGNED";
