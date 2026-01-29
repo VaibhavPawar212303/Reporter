@@ -10,59 +10,69 @@ import { auth } from '@clerk/nextjs/server';
 // this is fixed 
 export async function getDashboardStats() {
   try {
-    // 1. Authenticate the user session
     const { userId } = await auth();
-    if (!userId) {
-      return { error: "Unauthorized access detected." };
-    }
+    if (!userId) return { error: "Unauthorized" };
 
-    // 2. Resolve the user's Organization ID from the membership registry
     const membership = await db.query.organizationMembers.findFirst({
       where: eq(organizationMembers.userId, userId),
     });
 
-    if (!membership) {
-      return { error: "Security Protocol: No organization link found for this user." };
-    }
-
+    if (!membership) return { error: "No organization link found." };
     const orgId = membership.organizationId;
 
-    // 3. Fetch Builds scoped to this organization only
-    const builds = await db.select()
-      .from(automationBuilds)
-      .where(eq(automationBuilds.organizationId, orgId))
-      .orderBy(desc(automationBuilds.id))
-      .limit(50);
+    // 1. Fetch Builds (Increase limit to ensure we see all)
+    const builds = await db.select({
+      id: automationBuilds.id,
+      projectId: automationBuilds.projectId,
+      projectName: projects.name, 
+      status: automationBuilds.status,
+      environment: automationBuilds.environment,
+      type: automationBuilds.type,
+      createdAt: automationBuilds.createdAt,
+    })
+    .from(automationBuilds)
+    .leftJoin(projects, eq(automationBuilds.projectId, projects.id))
+    .where(eq(automationBuilds.organizationId, orgId))
+    .orderBy(desc(automationBuilds.id))
+    .limit(100); // 🟢 Increased limit
 
-    // 4. Fetch Requirement Count scoped to this organization
+    // 2. Fetch all Projects for Tabs
+    const orgProjects = await db.select().from(projects).where(eq(projects.organizationId, orgId));
+
+    // 3. Fetch Requirement Count
     const totalRequirementsCount = await db.select({ count: sql<number>`count(*)` })
       .from(testCases)
       .where(eq(testCases.organizationId, orgId));
 
-    // 5. Fetch Results for these builds (ensuring org isolation)
+    // 4. Fetch Results
     const buildIds = builds.map(b => b.id);
-    const results = buildIds.length > 0
-      ? await db.select()
-          .from(testResults)
-          .where(
-            and(
-              inArray(testResults.buildId, buildIds),
-              eq(testResults.organizationId, orgId) // Critical: Data Isolation
-            )
-          )
+    const rawResults = buildIds.length > 0
+      ? await db.select().from(testResults).where(and(inArray(testResults.buildId, buildIds), eq(testResults.organizationId, orgId)))
       : [];
 
-    // Return the telemetry package
+    // 5. 🟢 CRITICAL FIX: Ensure JSON 'tests' are parsed correctly
+    const results = rawResults.map(r => {
+      let parsedTests = [];
+      try {
+        parsedTests = typeof r.tests === 'string' ? JSON.parse(r.tests) : r.tests;
+      } catch (e) {
+        console.error(`Failed to parse JSON for build ${r.buildId}`);
+      }
+      return { ...r, tests: parsedTests };
+    });
+
+    console.log(`📊 Stats Sync: Found ${builds.length} builds and ${results.length} result rows.`);
+
     return {
       builds,
       results,
-      totalRequirements: totalRequirementsCount[0]?.count || 0,
-      organizationId: orgId
+      projects: orgProjects,
+      totalRequirements: totalRequirementsCount[0]?.count || 0
     };
 
   } catch (error: any) {
-    console.error("🔍 [TELEMETRY_FAILURE]:", error.message);
-    return { error: "System Error: Failed to retrieve industrial analytics." };
+    console.error("🔍 [DB_ERROR]:", error.message);
+    return { error: error.message };
   }
 }
 export async function getBuildHistory() {
