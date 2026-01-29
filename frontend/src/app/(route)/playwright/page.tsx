@@ -28,7 +28,7 @@ import { TestRow } from "./_components/TestRow";
 import { cn } from "@/lib/utils";
 import { BuildOverview } from "./_components/BuildOverview";
 
-/* -------------------- HELPERS (Maintained) -------------------- */
+/* -------------------- HELPERS (FIXED PARSING LOGIC) -------------------- */
 function normalizeStatus(status: string): 'passed' | 'failed' | 'running' | 'skipped' {
   if (!status) return 'running';
   const s = status.toLowerCase().trim();
@@ -40,8 +40,19 @@ function normalizeStatus(status: string): 'passed' | 'failed' | 'running' | 'ski
 
 function normalizePlaywrightResults(specResults: any[]) {
   const testMap = new Map<string, any>();
+  
   specResults?.forEach((spec: any) => {
-    spec.tests?.forEach((test: any) => {
+    // 🟢 FIX: Ensure 'tests' is a valid array (handles stringified JSON from DB)
+    let tests = [];
+    try {
+      tests = typeof spec.tests === 'string' ? JSON.parse(spec.tests) : spec.tests;
+    } catch (e) {
+      console.error("JSON Parsing failed for spec:", spec.id);
+    }
+
+    if (!Array.isArray(tests)) return;
+
+    tests.forEach((test: any) => {
       const key = test.unique_key || `${test.project || 'default'}::${test.title || 'unknown'}`;
       const existing = testMap.get(key);
       if (!existing) {
@@ -72,7 +83,7 @@ function PlaywrightDashboardContent() {
   const [builds, setBuilds] = useState<any[]>([]);
   const [trendData, setTrendData] = useState<any[]>([]);
   const [masterCases, setMasterCases] = useState<any[]>([]);
-  const [selectedBuildId, setSelectedBuildId] = useState<number | null>(null);
+  const [selectedBuildId, setSelectedBuildId] = useState<number | null>(urlBuildId ? Number(urlBuildId) : null);
   const [buildDetails, setBuildDetails] = useState<any>(null);
   const [project, setProject] = useState<any>(null);
   
@@ -85,7 +96,6 @@ function PlaywrightDashboardContent() {
   const [isShared, setIsShared] = useState(false);
   const [loadingLogs, setLoadingLogs] = useState<string | null>(null);
   
-  // New state to toggle AI Component
   const [showAnalysis, setShowAnalysis] = useState(false);
 
   const masterMap = useMemo(() => masterCases.reduce((acc: any, tc) => {
@@ -96,6 +106,7 @@ function PlaywrightDashboardContent() {
   const toggleFavorite = (id: string) => setFavorites(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
   const loadData = useCallback(async (initial = false) => {
+    if (!projectId) return;
     try {
       if (initial) setLoading(true);
       
@@ -116,17 +127,17 @@ function PlaywrightDashboardContent() {
       if (Array.isArray(trend)) setTrendData(trend);
       else setTrendData([]);
       
+      // 🟢 Logic: If no specific build selected, default to the latest in history
       if (pwBuilds.length && !selectedBuildId) {
-        const urlBuildId = searchParams.get('buildId');
-        setSelectedBuildId(urlBuildId ? Number(urlBuildId) : pwBuilds[0].id);
+        setSelectedBuildId(pwBuilds[0].id);
       }
       
     } catch (e) { 
-      console.error(e); 
+      console.error("Dashboard Load Error:", e); 
     } finally { 
       if (initial) setLoading(false); 
     }
-  }, [selectedBuildId, projectId, searchParams]);
+  }, [selectedBuildId, projectId]);
 
   useEffect(() => {
     if (!selectedBuildId) return;
@@ -155,6 +166,9 @@ function PlaywrightDashboardContent() {
         if (!prev) return prev;
         const results = prev.results.map((spec: any) => ({
           ...spec,
+          tests: typeof spec.tests === 'string' ? JSON.parse(spec.tests) : spec.tests
+        })).map((spec: any) => ({
+          ...spec,
           tests: spec.tests.map((t: any) => t.title === title ? { ...t, ...data, has_details: true } : t)
         }));
         return { ...prev, results };
@@ -163,6 +177,7 @@ function PlaywrightDashboardContent() {
   };
 
   const normalizedTests = useMemo(() => normalizePlaywrightResults(buildDetails?.results || []), [buildDetails]);
+  
   const currentStats = useMemo(() => {
     const s = { total: 0, passed: 0, failed: 0, running: 0 };
     normalizedTests.forEach((t: any) => {
@@ -218,7 +233,6 @@ function PlaywrightDashboardContent() {
             </div>
           </div>
           <div className="flex gap-2">
-            {/* Intelligence Analysis Toggle Button */}
             <button 
               onClick={() => setShowAnalysis(!showAnalysis)} 
               className={cn(
@@ -235,16 +249,12 @@ function PlaywrightDashboardContent() {
           </div>
         </header>
 
-        {/* --- CONDITIONAL UI RENDERING --- */}
         {showAnalysis ? (
-          /* SHOW ONLY INTELLIGENCE PANEL */
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
             <BuildOverview buildId={selectedBuildId} buildData={buildDetails} />
           </div>
         ) : (
-          /* SHOW FULL DASHBOARD UI */
           <div className="space-y-8 animate-in fade-in duration-500">
-            {/* STATS GRID */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard title="Throughput" value={currentStats.total} sub="Active Scenarios" icon={<Shield size={18}/>} color="indigo" />
               <StatCard title="Reliability" value={currentStats.passed} sub="Success Vector" icon={<CheckCircle2 size={18}/>} color="emerald" />
@@ -252,7 +262,6 @@ function PlaywrightDashboardContent() {
               <StatCard title="Build Health" value={`${analysis.cRate}%`} sub="Stability Index" icon={<Zap size={18}/>} trend={analysis.diff} color="zinc" />
             </div>
 
-            {/* CHARTS SECTION */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
               <div className="xl:col-span-2 bg-[#111114] border border-zinc-800 rounded-sm shadow-sm flex flex-col">
                 <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
@@ -294,7 +303,6 @@ function PlaywrightDashboardContent() {
               </div>
             </div>
 
-            {/* FILTERS PANEL */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="flex items-center gap-2 bg-[#111114] border border-zinc-800 p-2 rounded-sm shadow-sm overflow-x-auto scrollbar-hide">
                 <FilterButton active={filterStatus === 'all'} label="TOTAL" count={currentStats.total} onClick={() => setFilterStatus('all')} color="zinc" />
@@ -308,7 +316,6 @@ function PlaywrightDashboardContent() {
               </div>
             </div>
 
-            {/* RESULTS LIST */}
             <div className="space-y-12 pb-40">
               {Object.entries(normalizedTests.reduce((acc: any, t: any) => {
                 if ((filterStatus === 'all' || t.status === filterStatus) && t.project.toLowerCase().includes(projectSearch.toLowerCase())) {
@@ -345,10 +352,9 @@ function PlaywrightDashboardContent() {
   );
 }
 
-/* ... EXPORT WRAPPER AND STAT CARD COMPONENTS MAINTAINED BELOW ... */
 export default function PlaywrightDashboard() {
   return (
-    <Suspense fallback={<div className="h-screen flex items-center justify-center bg-[#09090b]"><Loader2 className="animate-spin text-zinc-500 w-8 h-8" /></div>}>
+    <Suspense fallback={<div className="h-screen flex flex-col items-center justify-center bg-[#09090b] text-zinc-500"><Loader2 className="animate-spin" /></div>}>
       <PlaywrightDashboardContent />
     </Suspense>
   );
