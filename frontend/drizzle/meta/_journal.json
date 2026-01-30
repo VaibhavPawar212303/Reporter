@@ -8,6 +8,13 @@
       "when": 1769563526450,
       "tag": "0000_rare_skaar",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1769759811415,
+      "tag": "0001_acoustic_wraith",
+      "breakpoints": true
     }
   ]
 }
