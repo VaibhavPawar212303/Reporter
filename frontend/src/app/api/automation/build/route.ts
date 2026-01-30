@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm'; // Added sql
 import { db } from '../../../../../db';
 import { automationBuilds, projects } from '../../../../../db/schema';
 
@@ -14,7 +14,6 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    // 🟢 Added session_id as an optional parameter
     const { project_id, environment, type, session_id } = body;
 
     if (!project_id) {
@@ -29,10 +28,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
-    // 🟢 PARALLEL HANDSHAKE LOGIC
-    // If a session_id is provided, check if a build already exists for this session
+    /**
+     * 🟢 ATOMIC GET-OR-CREATE LOGIC
+     * Using the database Unique Index as a lock to prevent race conditions.
+     */
     if (session_id) {
-      const existingBuild = await db.query.automationBuilds.findFirst({
+      // 1. Attempt Atomic Insert. If (projectId + sessionId) exists, perform a No-Op Update.
+      await db.insert(automationBuilds)
+        .values({
+          projectId: Number(project_id),
+          organizationId: project.organizationId,
+          sessionId: session_id,
+          environment: environment || 'dev',
+          status: 'running',
+          type: type || 'playwright',
+        })
+        .onDuplicateKeyUpdate({
+          set: { status: 'running' } // No-op: just ensures the query succeeds if record exists
+        });
+
+      // 2. Fetch the ID (Guaranteed to be unique due to DB constraint)
+      const build = await db.query.automationBuilds.findFirst({
         where: and(
           eq(automationBuilds.projectId, Number(project_id)),
           eq(automationBuilds.sessionId, session_id),
@@ -40,31 +56,29 @@ export async function POST(req: Request) {
         ),
       });
 
-      if (existingBuild) {
-        console.log(`[PIPELINE] Existing Session Linked: ID #${existingBuild.id} for Session ${session_id}`);
+      if (build) {
+        console.log(`[PIPELINE] Session Handshake: ID #${build.id} for Session ${session_id}`);
         return NextResponse.json({
           success: true,
-          buildId: existingBuild.id,
+          buildId: build.id,
           projectId: project_id,
           organizationId: project.organizationId,
-          isExisting: true // Signal that we are merging into an existing run
         });
       }
     }
 
-    // CREATE NEW BUILD (If no session match found or no session_id provided)
+    // FALLBACK: Standard Insert for local runs (no session_id provided)
     const result = await db.insert(automationBuilds).values({
       projectId: Number(project_id),
       organizationId: project.organizationId,
-      sessionId: session_id || null, // Store session_id for future instance handshakes
+      sessionId: session_id || null,
       environment: environment || 'dev',
       status: 'running',
       type: type || 'playwright',
     });
 
     const insertedId = (result as any).lastInsertId;
-
-    console.log(`[PIPELINE] New Build Initialized: ID #${insertedId} for Project #${project_id}`);
+    console.log(`[PIPELINE] New Build Initialized: ID #${insertedId}`);
 
     return NextResponse.json({
       success: true,

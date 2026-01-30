@@ -90,7 +90,7 @@ export const automationBuilds = mysqlTable('automation_builds', {
   projectId: int('project_id').references(() => projects.id, { onDelete: 'cascade' }).notNull(),
   organizationId: varchar('organization_id', { length: 255 }).references(() => organizations.id, { onDelete: 'cascade' }).notNull(),
   triggeredById: varchar('triggered_by_id', { length: 255 }).references(() => users.id),
-  // 🟢 Added: sessionId to support parallel execution handshakes
+  // sessionId to support parallel execution handshakes
   sessionId: varchar('session_id', { length: 255 }), 
   createdAt: timestamp('created_at').defaultNow().notNull(),
   status: varchar('status', { length: 50 }).default('running').notNull(),
@@ -99,8 +99,7 @@ export const automationBuilds = mysqlTable('automation_builds', {
 }, (table) => ({
   projectIdx: index('build_project_idx').on(table.projectId),
   orgIdx: index('build_org_idx').on(table.organizationId),
-  // 🟢 Added: index for session_id to optimize parallel build lookups
-  sessionIdx: index('build_session_idx').on(table.sessionId),
+  projectSessionUniqueIdx: uniqueIndex('project_session_unique_idx').on(table.projectId, table.sessionId),
 }));
 
 // 7. TEST RESULTS (Linked to Build AND Project)
