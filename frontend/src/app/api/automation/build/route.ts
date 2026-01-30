@@ -24,13 +24,6 @@ export async function POST(req: Request) {
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
-
-    /**
-     * 🟢 STEP 1: PARALLEL SESSION CHECK
-     * If session_id exists, we check the DB first.
-     * We look for ANY build with this session, not just 'running', 
-     * to prevent duplicates if status changes.
-     */
     if (session_id) {
       const existingBuild = await db.query.automationBuilds.findFirst({
         where: and(
@@ -49,12 +42,6 @@ export async function POST(req: Request) {
         });
       }
     }
-
-    /**
-     * 🟢 STEP 2: ATOMIC CREATION
-     * If we reach here, it means no session was found OR it's a local run.
-     * We use onDuplicateKeyUpdate as a safety "lock".
-     */
     const insertValues = {
       projectId: Number(project_id),
       organizationId: project.organizationId,
@@ -67,12 +54,8 @@ export async function POST(req: Request) {
     const result = await db.insert(automationBuilds)
       .values(insertValues)
       .onDuplicateKeyUpdate({
-        set: { status: 'running' } // This prevents the crash if another worker won the race 1ms ago
+        set: { status: 'running' }
       });
-
-    // 🟢 STEP 3: RESOLVE ID
-    // result.lastInsertId works for the winner. 
-    // For losers of the race, we fetch the existing one.
     let finalBuildId = (result as any).lastInsertId;
 
     if (!finalBuildId && session_id) {
