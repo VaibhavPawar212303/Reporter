@@ -142,8 +142,224 @@ export async function getProjectBuildHistory(projectId: number) {
     return { error: "SYSTEM_RESOURCES_UNAVAILABLE" };
   }
 }
+const forceSlice = (val: any, limit: number, fallback: string | null = null) => {
+  if (val === undefined || val === null || val === "" || val === "-") return fallback;
+  return String(val).trim().slice(0, limit);
+};
+export async function importTestCases(projectId: number, dataArray: any[]) {
+  try {
+    // 1. GET AUTH CONTEXT
+    const { userId } = await auth();
+    if (!userId) return { success: false, error: "Unauthorized" };
 
+    // 2. GET USER'S ORGANIZATION ID
+    const membership = await db.query.organizationMembers.findFirst({
+      where: eq(organizationMembers.userId, userId),
+    });
 
+    if (!membership) return { success: false, error: "No organization found for user" };
+    const orgId = membership.organizationId;
+
+    // 3. MAP DATA TO SCHEMA (Injecting orgId and projectId)
+    const formattedData = dataArray.map((item, index) => {
+      const find = (key: string) => {
+        const normalizedSearch = key.toLowerCase().replace(/[\s_]/g, "");
+        const targetKey = Object.keys(item).find((actualKey) => {
+          return actualKey.toLowerCase().replace(/[\s_]/g, "") === normalizedSearch;
+        });
+        return targetKey ? item[targetKey] : undefined;
+      };
+
+      return {
+        projectId: Number(projectId),
+        organizationId: orgId, // FIXED: Now explicitly passed to every row
+        caseCode: forceSlice(find('caseCode') || find('case_code'), 100) || `TC-AUTO-${Date.now()}-${index}`,
+        caseKey: forceSlice(find('caseKey'), 100),
+        moduleName: forceSlice(find('moduleName') || find('module_name'), 100, 'GENERAL'),
+        testSuite: forceSlice(find('testSuite') || find('test_suite'), 100),
+        title: String(find('title') || 'Untitled Case'),
+        description: find('description') ? String(find('description')) : null,
+        precondition: find('precondition') ? String(find('precondition')) : null,
+        steps: find('steps') ? String(find('steps')) : null,
+        expectedResult: find('expectedResult') || find('expected_result') ? String(find('expectedResult') || find('expected_result')) : null,
+        priority: forceSlice(find('priorities') || find('priority'), 20, 'medium'),
+        mode: forceSlice(find('mode'), 50, 'manual'),
+        type: forceSlice(find('type'), 50, 'standard'),
+        createdById: userId, // Link to the user who uploaded
+        shareableLink: find('shareableTestCaseDetails') || find('shareable_link') ? String(find('shareableTestCaseDetails') || find('shareable_link')) : null,
+        tags: find('tags') ? String(find('tags')) : null,
+      };
+    });
+
+    // 4. CHUNKED BATCH UPSERT (Optimized for TiDB)
+    const chunkSize = 40; 
+    for (let i = 0; i < formattedData.length; i += chunkSize) {
+      const chunk = formattedData.slice(i, i + chunkSize);
+      
+      await db.insert(testCases)
+        .values(chunk as any)
+        .onDuplicateKeyUpdate({
+          set: {
+            title: sql`VALUES(title)`,
+            //@ts-ignore
+            module_name: sql`VALUES(module_name)`,
+            description: sql`VALUES(description)`,
+            steps: sql`VALUES(steps)`,
+            expected_result: sql`VALUES(expected_result)`,
+            priority: sql`VALUES(priority)`,
+            tags: sql`VALUES(tags)`,
+            updatedAt: new Date()
+          }
+        });
+    }
+    
+    revalidatePath(`/projects/${projectId}/manual`);
+    return { success: true, count: formattedData.length };
+
+  } catch (error: any) {
+    console.error("IMPORT_CRITICAL_ERROR:", error);
+    return { success: false, error: error.message };
+  }
+}
+export async function getBuildDetails(buildId: number) {
+  try {
+    console.log('\n' + '='.repeat(60));
+    console.log('🔍 getBuildDetails called with buildId:', buildId);
+    console.log('='.repeat(60));
+
+    const { userId } = await auth();
+    console.log('📋 Step 1: userId:', userId);
+
+    if (!userId) {
+      console.log('❌ No userId found');
+      return { error: 'Unauthorized' };
+    }
+
+    // Get user's organization
+    console.log('📋 Step 2: Getting organization membership');
+    const membership = await db.query.organizationMembers.findFirst({
+      where: eq(organizationMembers.userId, userId),
+    });
+    console.log('   - Membership:', membership);
+
+    if (!membership) {
+      console.log('❌ No organization found for user');
+      return { error: 'No organization found' };
+    }
+
+    console.log('   - Organization ID:', membership.organizationId);
+
+    // Get build (simple query without 'with')
+    console.log('📋 Step 3: Getting build');
+    console.log('   - Looking for buildId:', buildId);
+    console.log('   - With organizationId:', membership.organizationId);
+
+    const build = await db
+      .select()
+      .from(automationBuilds)
+      .where(
+        and(
+          eq(automationBuilds.id, buildId),
+          eq(automationBuilds.organizationId, membership.organizationId)
+        )
+      )
+      .limit(1);
+
+    console.log('   - Build query result:', build);
+    console.log('   - Build length:', build?.length);
+
+    if (!build || build.length === 0) {
+      console.log('❌ Build not found');
+      
+      // Debug: Check if build exists without org filter
+      const buildWithoutOrg = await db
+        .select()
+        .from(automationBuilds)
+        .where(eq(automationBuilds.id, buildId))
+        .limit(1);
+      
+      console.log('   - Build without org filter:', buildWithoutOrg);
+      if (buildWithoutOrg.length > 0) {
+        console.log('   - Build exists but has different organizationId:', buildWithoutOrg[0].organizationId);
+      }
+      
+      return null;
+    }
+
+    const buildData = build[0];
+    console.log('✅ Build found:', {
+      id: buildData.id,
+      projectId: buildData.projectId,
+      organizationId: buildData.organizationId,
+      status: buildData.status,
+    });
+
+    // Get project separately
+    console.log('📋 Step 4: Getting project');
+    let project = null;
+    if (buildData.projectId) {
+      const projectResult = await db
+        .select()
+        .from(projects)
+        .where(eq(projects.id, buildData.projectId))
+        .limit(1);
+      project = projectResult[0] || null;
+      console.log('   - Project:', project?.name);
+    }
+
+    // Get triggered by user separately
+    console.log('📋 Step 5: Getting triggered by user');
+    let triggeredBy = null;
+    if (buildData.triggeredById) {
+      const userResult = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, buildData.triggeredById))
+        .limit(1);
+      triggeredBy = userResult[0] || null;
+      console.log('   - Triggered by:', triggeredBy?.email);
+    }
+
+    // Get test results for this build
+    console.log('📋 Step 6: Getting test results');
+    const results = await db
+      .select()
+      .from(testResults)
+      .where(eq(testResults.buildId, buildId));
+    console.log('   - Results count:', results.length);
+
+    const finalResult = {
+      ...buildData,
+      project: project,
+      triggeredBy: triggeredBy,
+      results: results.map((r) => ({
+        ...r,
+        tests: Array.isArray(r.tests)
+          ? (r.tests as any[]).map((t) => ({
+              ...t,
+              has_details: !!(t.steps?.length || t.logs?.length || t.error),
+            }))
+          : [],
+      })),
+    };
+
+    console.log('✅ Final result:', {
+      buildId: finalResult.id,
+      projectName: finalResult.project?.name,
+      resultsCount: finalResult.results.length,
+      totalTests: finalResult.results.reduce((acc, r) => acc + r.tests.length, 0),
+    });
+    console.log('='.repeat(60) + '\n');
+
+    return finalResult;
+  } catch (e: any) {
+    console.error('❌ getBuildDetails error:', e.message);
+    console.error('   Stack:', e.stack);
+    return null;
+  }
+}
+
+// need to be work 
 export async function uploadMasterTestCases(data: any[], projectId: number) {
   try {
     const { userId } = await auth();
@@ -660,143 +876,7 @@ export async function createProject(formData: {
   }
 }
 
-export async function getBuildDetails(buildId: number) {
-  try {
-    console.log('\n' + '='.repeat(60));
-    console.log('🔍 getBuildDetails called with buildId:', buildId);
-    console.log('='.repeat(60));
 
-    const { userId } = await auth();
-    console.log('📋 Step 1: userId:', userId);
-
-    if (!userId) {
-      console.log('❌ No userId found');
-      return { error: 'Unauthorized' };
-    }
-
-    // Get user's organization
-    console.log('📋 Step 2: Getting organization membership');
-    const membership = await db.query.organizationMembers.findFirst({
-      where: eq(organizationMembers.userId, userId),
-    });
-    console.log('   - Membership:', membership);
-
-    if (!membership) {
-      console.log('❌ No organization found for user');
-      return { error: 'No organization found' };
-    }
-
-    console.log('   - Organization ID:', membership.organizationId);
-
-    // Get build (simple query without 'with')
-    console.log('📋 Step 3: Getting build');
-    console.log('   - Looking for buildId:', buildId);
-    console.log('   - With organizationId:', membership.organizationId);
-
-    const build = await db
-      .select()
-      .from(automationBuilds)
-      .where(
-        and(
-          eq(automationBuilds.id, buildId),
-          eq(automationBuilds.organizationId, membership.organizationId)
-        )
-      )
-      .limit(1);
-
-    console.log('   - Build query result:', build);
-    console.log('   - Build length:', build?.length);
-
-    if (!build || build.length === 0) {
-      console.log('❌ Build not found');
-      
-      // Debug: Check if build exists without org filter
-      const buildWithoutOrg = await db
-        .select()
-        .from(automationBuilds)
-        .where(eq(automationBuilds.id, buildId))
-        .limit(1);
-      
-      console.log('   - Build without org filter:', buildWithoutOrg);
-      if (buildWithoutOrg.length > 0) {
-        console.log('   - Build exists but has different organizationId:', buildWithoutOrg[0].organizationId);
-      }
-      
-      return null;
-    }
-
-    const buildData = build[0];
-    console.log('✅ Build found:', {
-      id: buildData.id,
-      projectId: buildData.projectId,
-      organizationId: buildData.organizationId,
-      status: buildData.status,
-    });
-
-    // Get project separately
-    console.log('📋 Step 4: Getting project');
-    let project = null;
-    if (buildData.projectId) {
-      const projectResult = await db
-        .select()
-        .from(projects)
-        .where(eq(projects.id, buildData.projectId))
-        .limit(1);
-      project = projectResult[0] || null;
-      console.log('   - Project:', project?.name);
-    }
-
-    // Get triggered by user separately
-    console.log('📋 Step 5: Getting triggered by user');
-    let triggeredBy = null;
-    if (buildData.triggeredById) {
-      const userResult = await db
-        .select()
-        .from(users)
-        .where(eq(users.id, buildData.triggeredById))
-        .limit(1);
-      triggeredBy = userResult[0] || null;
-      console.log('   - Triggered by:', triggeredBy?.email);
-    }
-
-    // Get test results for this build
-    console.log('📋 Step 6: Getting test results');
-    const results = await db
-      .select()
-      .from(testResults)
-      .where(eq(testResults.buildId, buildId));
-    console.log('   - Results count:', results.length);
-
-    const finalResult = {
-      ...buildData,
-      project: project,
-      triggeredBy: triggeredBy,
-      results: results.map((r) => ({
-        ...r,
-        tests: Array.isArray(r.tests)
-          ? (r.tests as any[]).map((t) => ({
-              ...t,
-              has_details: !!(t.steps?.length || t.logs?.length || t.error),
-            }))
-          : [],
-      })),
-    };
-
-    console.log('✅ Final result:', {
-      buildId: finalResult.id,
-      projectName: finalResult.project?.name,
-      resultsCount: finalResult.results.length,
-      totalTests: finalResult.results.reduce((acc, r) => acc + r.tests.length, 0),
-    });
-    console.log('='.repeat(60) + '\n');
-
-    return finalResult;
-  } catch (e: any) {
-    console.error('❌ getBuildDetails error:', e.message);
-    console.error('   Stack:', e.stack);
-    return null;
-  }
-}
 export async function getProjects() {
   const { userId } = await auth();
 
@@ -1014,83 +1094,4 @@ export async function getProjectManualStats(projectId: number) {
   };
 }
 
-// this is fixed 
-const forceSlice = (val: any, limit: number, fallback: string | null = null) => {
-  if (val === undefined || val === null || val === "" || val === "-") return fallback;
-  return String(val).trim().slice(0, limit);
-};
-export async function importTestCases(projectId: number, dataArray: any[]) {
-  try {
-    // 1. GET AUTH CONTEXT
-    const { userId } = await auth();
-    if (!userId) return { success: false, error: "Unauthorized" };
 
-    // 2. GET USER'S ORGANIZATION ID
-    const membership = await db.query.organizationMembers.findFirst({
-      where: eq(organizationMembers.userId, userId),
-    });
-
-    if (!membership) return { success: false, error: "No organization found for user" };
-    const orgId = membership.organizationId;
-
-    // 3. MAP DATA TO SCHEMA (Injecting orgId and projectId)
-    const formattedData = dataArray.map((item, index) => {
-      const find = (key: string) => {
-        const normalizedSearch = key.toLowerCase().replace(/[\s_]/g, "");
-        const targetKey = Object.keys(item).find((actualKey) => {
-          return actualKey.toLowerCase().replace(/[\s_]/g, "") === normalizedSearch;
-        });
-        return targetKey ? item[targetKey] : undefined;
-      };
-
-      return {
-        projectId: Number(projectId),
-        organizationId: orgId, // FIXED: Now explicitly passed to every row
-        caseCode: forceSlice(find('caseCode') || find('case_code'), 100) || `TC-AUTO-${Date.now()}-${index}`,
-        caseKey: forceSlice(find('caseKey'), 100),
-        moduleName: forceSlice(find('moduleName') || find('module_name'), 100, 'GENERAL'),
-        testSuite: forceSlice(find('testSuite') || find('test_suite'), 100),
-        title: String(find('title') || 'Untitled Case'),
-        description: find('description') ? String(find('description')) : null,
-        precondition: find('precondition') ? String(find('precondition')) : null,
-        steps: find('steps') ? String(find('steps')) : null,
-        expectedResult: find('expectedResult') || find('expected_result') ? String(find('expectedResult') || find('expected_result')) : null,
-        priority: forceSlice(find('priorities') || find('priority'), 20, 'medium'),
-        mode: forceSlice(find('mode'), 50, 'manual'),
-        type: forceSlice(find('type'), 50, 'standard'),
-        createdById: userId, // Link to the user who uploaded
-        shareableLink: find('shareableTestCaseDetails') || find('shareable_link') ? String(find('shareableTestCaseDetails') || find('shareable_link')) : null,
-        tags: find('tags') ? String(find('tags')) : null,
-      };
-    });
-
-    // 4. CHUNKED BATCH UPSERT (Optimized for TiDB)
-    const chunkSize = 40; 
-    for (let i = 0; i < formattedData.length; i += chunkSize) {
-      const chunk = formattedData.slice(i, i + chunkSize);
-      
-      await db.insert(testCases)
-        .values(chunk as any)
-        .onDuplicateKeyUpdate({
-          set: {
-            title: sql`VALUES(title)`,
-            //@ts-ignore
-            module_name: sql`VALUES(module_name)`,
-            description: sql`VALUES(description)`,
-            steps: sql`VALUES(steps)`,
-            expected_result: sql`VALUES(expected_result)`,
-            priority: sql`VALUES(priority)`,
-            tags: sql`VALUES(tags)`,
-            updatedAt: new Date()
-          }
-        });
-    }
-    
-    revalidatePath(`/projects/${projectId}/manual`);
-    return { success: true, count: formattedData.length };
-
-  } catch (error: any) {
-    console.error("IMPORT_CRITICAL_ERROR:", error);
-    return { success: false, error: error.message };
-  }
-}
