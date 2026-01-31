@@ -27,8 +27,9 @@ import { ProjectLevelStats } from "./_components/ProjectLevelStats";
 import { TestRow } from "./_components/TestRow";
 import { cn } from "@/lib/utils";
 import { BuildOverview } from "./_components/BuildOverview";
+import { useTheme } from "next-themes";
 
-/* -------------------- HELPERS (FIXED PARSING LOGIC) -------------------- */
+/* --- HELPERS (LOGIC MAINTAINED AS IS) --- */
 function normalizeStatus(status: string): 'passed' | 'failed' | 'running' | 'skipped' {
   if (!status) return 'running';
   const s = status.toLowerCase().trim();
@@ -40,18 +41,14 @@ function normalizeStatus(status: string): 'passed' | 'failed' | 'running' | 'ski
 
 function normalizePlaywrightResults(specResults: any[]) {
   const testMap = new Map<string, any>();
-  
   specResults?.forEach((spec: any) => {
-    // 🟢 FIX: Ensure 'tests' is a valid array (handles stringified JSON from DB)
     let tests = [];
     try {
       tests = typeof spec.tests === 'string' ? JSON.parse(spec.tests) : spec.tests;
     } catch (e) {
       console.error("JSON Parsing failed for spec:", spec.id);
     }
-
     if (!Array.isArray(tests)) return;
-
     tests.forEach((test: any) => {
       const key = test.unique_key || `${test.project || 'default'}::${test.title || 'unknown'}`;
       const existing = testMap.get(key);
@@ -72,10 +69,12 @@ function normalizePlaywrightResults(specResults: any[]) {
   return Array.from(testMap.values());
 }
 
-/* -------------------------------------------------------------------------- */
-/*                               DASHBOARD CONTENT                             */
-/* -------------------------------------------------------------------------- */
 function PlaywrightDashboardContent() {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const gridColor = isDark ? "#27272a" : "#e4e4e7";
+  const tooltipBg = isDark ? "#000000" : "#ffffff";
+
   const searchParams = useSearchParams();
   const projectId = searchParams.get('projectId');
   const urlBuildId = searchParams.get('buildId');
@@ -86,7 +85,6 @@ function PlaywrightDashboardContent() {
   const [selectedBuildId, setSelectedBuildId] = useState<number | null>(urlBuildId ? Number(urlBuildId) : null);
   const [buildDetails, setBuildDetails] = useState<any>(null);
   const [project, setProject] = useState<any>(null);
-  
   const [loading, setLoading] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [expandedTests, setExpandedTests] = useState<string[]>([]);
@@ -95,7 +93,6 @@ function PlaywrightDashboardContent() {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [isShared, setIsShared] = useState(false);
   const [loadingLogs, setLoadingLogs] = useState<string | null>(null);
-  
   const [showAnalysis, setShowAnalysis] = useState(false);
 
   const masterMap = useMemo(() => masterCases.reduce((acc: any, tc) => {
@@ -103,39 +100,23 @@ function PlaywrightDashboardContent() {
     return acc;
   }, {}), [masterCases]);
 
-  const toggleFavorite = (id: string) => setFavorites(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-
   const loadData = useCallback(async (initial = false) => {
     if (!projectId) return;
     try {
       if (initial) setLoading(true);
-      
       const [history, master, trend, projInfo] = await Promise.all([
-        getBuildHistory(), 
-        getMasterTestCases(), 
-        getPlaywrightTrend(Number(projectId)),
-        getProjectById(Number(projectId))
+        getBuildHistory(), getMasterTestCases(), getPlaywrightTrend(Number(projectId)), getProjectById(Number(projectId))
       ]);
-  
-      const pwBuilds = Array.isArray(history) 
-        ? history.filter((b: any) => b.type?.toLowerCase() === 'playwright')
-        : [];
+      const pwBuilds = Array.isArray(history) ? history.filter((b: any) => b.type?.toLowerCase() === 'playwright') : [];
       setBuilds(pwBuilds);
       setMasterCases(master);
       setProject(projInfo);
-  
-      if (Array.isArray(trend)) setTrendData(trend);
-      else setTrendData([]);
-      
-      // 🟢 Logic: If no specific build selected, default to the latest in history
-      if (pwBuilds.length && !selectedBuildId) {
-        setSelectedBuildId(pwBuilds[0].id);
-      }
-      
-    } catch (e) { 
-      console.error("Dashboard Load Error:", e); 
-    } finally { 
-      if (initial) setLoading(false); 
+      setTrendData(Array.isArray(trend) ? trend : []);
+      if (pwBuilds.length && !selectedBuildId) setSelectedBuildId(pwBuilds[0].id);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      if (initial) setLoading(false);
     }
   }, [selectedBuildId, projectId]);
 
@@ -207,43 +188,43 @@ function PlaywrightDashboardContent() {
   ].filter(d => d.value > 0), [currentStats]);
 
   if (loading) return (
-    <div className="h-screen flex flex-col items-center justify-center bg-[#09090b]">
-      <Loader2 className="w-8 h-8 text-zinc-500 animate-spin" />
+    <div className="h-screen flex flex-col items-center justify-center bg-background">
+      <Loader2 className="w-8 h-8 text-muted animate-spin" />
     </div>
   );
 
   return (
-    <div className="flex h-screen bg-[#0c0c0e] text-zinc-300 font-sans selection:bg-indigo-500/30 overflow-hidden">
-      <main className="flex-1 overflow-y-auto p-8 space-y-8 bg-[#0c0c0e] custom-scrollbar">
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-zinc-800 pb-8">
+    <div className="flex h-screen bg-background text-foreground font-sans selection:bg-indigo-500/30 overflow-hidden transition-colors duration-300">
+      <main className="flex-1 overflow-y-auto p-8 space-y-8 bg-background custom-scrollbar">
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-border pb-8">
           <div className="space-y-1">
-            <div className="flex items-center gap-2 text-zinc-500">
+            <div className="flex items-center gap-2 text-muted">
                <Command size={14} />
                <span className="text-[10px] font-bold uppercase tracking-widest">Analytics / Playwright Console</span>
             </div>
-            <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3 uppercase">
+            <h1 className="text-3xl font-bold text-foreground tracking-tight flex items-center gap-3 uppercase">
               {showAnalysis ? 'Intelligence Analysis' : 'Playwright Command Center'}
             </h1>
             <div className="flex items-center gap-3 mt-2">
-               <div className={cn("px-2 py-0.5 rounded-sm text-[10px] font-black border", analysis.improve ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500")}>
+               <div className={cn("px-2 py-0.5 rounded-sm text-[10px] font-black border", analysis.improve ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-500" : "bg-rose-500/10 text-rose-600 dark:text-rose-500")}>
                   {analysis.improve ? <ArrowUpRight size={10} className="inline mr-1"/> : <ArrowDownRight size={10} className="inline mr-1"/>}
                   {Math.abs(analysis.diff)}% {analysis.improve ? 'HEALTH_GAIN' : 'REGRESSION'}
                </div>
-               <span className="text-zinc-600 text-[9px] font-bold uppercase tracking-widest font-mono opacity-50">stability_baseline: {analysis.hRate}%</span>
+               <span className="text-muted text-[9px] font-bold uppercase tracking-widest font-mono opacity-50">stability_baseline: {analysis.hRate}%</span>
             </div>
           </div>
           <div className="flex gap-2">
             <button 
               onClick={() => setShowAnalysis(!showAnalysis)} 
               className={cn(
-                "px-4 py-2 border rounded-sm text-[10px] font-bold transition-all uppercase tracking-widest flex items-center gap-2",
-                showAnalysis ? "bg-white text-black border-white" : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white"
+                "px-4 py-2 border rounded-sm text-[10px] font-black transition-all uppercase tracking-widest flex items-center gap-2",
+                showAnalysis ? "bg-foreground text-background border-foreground shadow-xl" : "bg-card border-border text-muted hover:text-foreground"
               )}
             >
               {showAnalysis ? <X size={12} /> : <Sparkles size={12} />}
               {showAnalysis ? 'Exit Intelligence' : 'Run Intelligence'}
             </button>
-            <button onClick={() => setIsShared(!isShared)} className="px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-sm text-zinc-400 text-[10px] font-bold hover:text-white transition-all uppercase tracking-widest flex items-center gap-2">
+            <button onClick={() => setIsShared(!isShared)} className="px-4 py-2 bg-card border border-border rounded-sm text-muted text-[10px] font-bold hover:text-foreground transition-all uppercase tracking-widest flex items-center gap-2">
               {isShared ? <Unlock size={12} /> : <Lock size={12} />} {isShared ? 'Shared Access' : 'Private Instance'}
             </button>
           </div>
@@ -263,40 +244,40 @@ function PlaywrightDashboardContent() {
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-              <div className="xl:col-span-2 bg-[#111114] border border-zinc-800 rounded-sm shadow-sm flex flex-col">
-                <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
+              <div className="xl:col-span-2 bg-card border border-border rounded-sm shadow-sm flex flex-col">
+                <div className="px-6 py-4 border-b border-border bg-muted/5 flex items-center gap-3">
                   <TrendingUp size={14} className="text-emerald-500" />
-                  <h2 className="text-[10px] font-black text-zinc-100 uppercase tracking-widest">Execution Analytics</h2>
+                  <h2 className="text-[10px] font-black text-foreground uppercase tracking-widest">Execution Analytics</h2>
                 </div>
                 <div className="h-[250px] w-full p-6">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={trendData}>
                       <defs><linearGradient id="gradP" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/><stop offset="95%" stopColor="#10b981" stopOpacity={0}/></linearGradient></defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#27272a" />
-                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#52525b', fontSize: 9, fontWeight: 800}} dy={10} />
-                      <Tooltip contentStyle={{backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '2px'}} itemStyle={{fontSize: '11px', fontWeight: 'bold'}} />
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={gridColor} />
+                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: isDark ? '#52525b' : '#a1a1aa', fontSize: 9, fontWeight: 800}} dy={10} />
+                      <Tooltip contentStyle={{backgroundColor: tooltipBg, border: `1px solid ${gridColor}`, color: isDark ? '#fff' : '#000'}} itemStyle={{fontSize: '11px', fontWeight: 'bold'}} />
                       <Area type="monotone" dataKey="passed" stroke="#10b981" strokeWidth={3} fill="url(#gradP)" fillOpacity={1} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
               </div>
               
-              <div className="bg-[#111114] border border-zinc-800 rounded-sm shadow-sm flex flex-col items-center">
-                <div className="w-full px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
+              <div className="bg-card border border-border rounded-sm shadow-sm flex flex-col items-center">
+                <div className="w-full px-6 py-4 border-b border-border bg-muted/5 flex items-center gap-3">
                   <PieChartIcon size={14} className="text-indigo-500" />
-                  <h2 className="text-[10px] font-black text-zinc-100 uppercase tracking-widest">Status Matrix</h2>
+                  <h2 className="text-[10px] font-black text-foreground uppercase tracking-widest">Status Matrix</h2>
                 </div>
                 <div className="flex-1 w-full min-h-[200px] relative flex items-center justify-center">
                    <div className="absolute flex flex-col items-center justify-center pointer-events-none pb-4">
-                      <span className="text-3xl font-bold text-white font-mono">{currentStats.total}</span>
-                      <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-widest">Tests</span>
+                      <span className="text-3xl font-bold text-foreground font-mono">{currentStats.total}</span>
+                      <span className="text-[8px] font-bold text-muted uppercase tracking-widest">Tests</span>
                    </div>
                    <ResponsiveContainer width="100%" height="100%">
                      <PieChart>
                        <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={75} paddingAngle={8} dataKey="value" stroke="none">
                          {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                        </Pie>
-                       <Legend iconType="circle" verticalAlign="bottom" wrapperStyle={{paddingTop: '20px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase'}} />
+                       <Legend iconType="circle" verticalAlign="bottom" wrapperStyle={{paddingTop: '20px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', color: isDark ? '#a1a1aa' : '#71717a'}} />
                      </PieChart>
                    </ResponsiveContainer>
                 </div>
@@ -304,15 +285,15 @@ function PlaywrightDashboardContent() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="flex items-center gap-2 bg-[#111114] border border-zinc-800 p-2 rounded-sm shadow-sm overflow-x-auto scrollbar-hide">
+              <div className="flex items-center gap-2 bg-card border border-border p-2 rounded-sm shadow-sm overflow-x-auto scrollbar-hide">
                 <FilterButton active={filterStatus === 'all'} label="TOTAL" count={currentStats.total} onClick={() => setFilterStatus('all')} color="zinc" />
                 <FilterButton active={filterStatus === 'passed'} label="PASSED" count={currentStats.passed} onClick={() => setFilterStatus('passed')} color="green" />
                 <FilterButton active={filterStatus === 'failed'} label="FAILED" count={currentStats.failed} onClick={() => setFilterStatus('failed')} color="red" />
                 <FilterButton active={filterStatus === 'running'} label="ACTIVE" count={currentStats.running} onClick={() => setFilterStatus('running')} color="indigo" />
               </div>
-              <div className="flex items-center gap-4 px-4 bg-[#111114] border border-zinc-800 rounded-sm group focus-within:border-zinc-600 transition-all">
-                <Search size={14} className="text-zinc-600" />
-                <input value={projectSearch} onChange={e => setProjectSearch(e.target.value)} placeholder="SEARCH_WORKER_PROJECT..." className="bg-transparent border-none outline-none text-[11px] py-4 w-full text-zinc-200 font-mono" />
+              <div className="flex items-center gap-4 px-4 bg-card border border-border rounded-sm group focus-within:border-muted transition-all">
+                <Search size={14} className="text-muted" />
+                <input value={projectSearch} onChange={e => setProjectSearch(e.target.value)} placeholder="SEARCH_WORKER_PROJECT..." className="bg-transparent border-none outline-none text-[11px] py-4 w-full text-foreground font-mono placeholder:text-muted/50" />
               </div>
             </div>
 
@@ -324,19 +305,19 @@ function PlaywrightDashboardContent() {
                 }
                 return acc;
               }, {})).map(([project, tests]: any) => (
-                <div key={project} className="bg-[#111114] border border-zinc-800 rounded-sm overflow-hidden shadow-sm flex flex-col">
-                  <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex justify-between items-center">
+                <div key={project} className="bg-card border border-border rounded-sm overflow-hidden shadow-sm flex flex-col">
+                  <div className="px-6 py-4 border-b border-border bg-muted/5 flex justify-between items-center">
                     <div className="flex items-center gap-3">
                       <Cpu size={14} className="text-indigo-500" />
-                      <span className="text-xs font-bold text-zinc-100 uppercase tracking-widest font-mono">{project}</span>
+                      <span className="text-xs font-bold text-foreground uppercase tracking-widest font-mono">{project}</span>
                     </div>
                     <ProjectLevelStats tests={tests} />
                   </div>
-                  <div className="divide-y divide-zinc-800/50">
+                  <div className="divide-y divide-border">
                     {tests.map((t: any) => {
                       const uiId = t.unique_key || `${t.id}-${t.project}-${t.title}`;
                       return (
-                        <div key={uiId} className="relative group hover:bg-white/[0.01] transition-colors">
+                        <div key={uiId} className="relative group hover:bg-muted/5 transition-colors">
                           <TestRow test={t} masterMap={masterMap} isExpanded={expandedTests.includes(uiId)} isLoadingLogs={loadingLogs === uiId} onToggle={() => toggleTestLogs(uiId, t.id, t.title)} />
                         </div>
                       );
@@ -354,23 +335,23 @@ function PlaywrightDashboardContent() {
 
 export default function PlaywrightDashboard() {
   return (
-    <Suspense fallback={<div className="h-screen flex flex-col items-center justify-center bg-[#09090b] text-zinc-500"><Loader2 className="animate-spin" /></div>}>
+    <Suspense fallback={<div className="h-screen flex flex-col items-center justify-center bg-background text-muted"><Loader2 className="animate-spin" /></div>}>
       <PlaywrightDashboardContent />
     </Suspense>
   );
 }
 
 function StatCard({ title, value, sub, icon, pulse, color }: any) {
-  const accentColors: any = { indigo: 'border-t-indigo-500', amber: 'border-t-amber-500', emerald: 'border-t-emerald-500', zinc: 'border-t-zinc-500' };
+  const accents: any = { indigo: 'border-t-indigo-500', amber: 'border-t-amber-500', emerald: 'border-t-emerald-500', zinc: 'border-t-border' };
   return (
-    <div className={cn("bg-[#111114] border border-zinc-800 border-t-2 rounded-sm p-8 shadow-sm hover:bg-zinc-900/50 transition-all duration-300 group", accentColors[color])}>
+    <div className={cn("bg-card border border-border border-t-2 rounded-sm p-8 shadow-sm hover:bg-muted/5 transition-all duration-300 group", accents[color])}>
       <div className="flex justify-between items-center mb-6">
-        <div className="text-zinc-500 group-hover:text-white transition-colors">{icon}</div>
-        {pulse && <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />}
+        <div className="text-muted group-hover:text-foreground transition-colors">{icon}</div>
+        {pulse && <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]" />}
       </div>
-      <h3 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">{title}</h3>
-      <div className="text-4xl font-bold text-white tracking-tighter font-mono">{value ?? '0'}</div>
-      <p className="text-[9px] text-zinc-600 font-bold mt-3 uppercase tracking-widest">{sub}</p>
+      <h3 className="text-[10px] font-bold text-muted uppercase tracking-widest mb-1">{title}</h3>
+      <div className="text-4xl font-bold text-foreground tracking-tighter font-mono">{value ?? '0'}</div>
+      <p className="text-[9px] text-muted font-bold mt-3 uppercase tracking-widest">{sub}</p>
     </div>
   );
 }
