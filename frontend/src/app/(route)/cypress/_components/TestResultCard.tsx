@@ -1,124 +1,133 @@
 'use client';
-import React from "react";
-import { CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock } from "lucide-react";
+import React, { useEffect } from "react"; // Added useEffect
+import { CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const cleanAnsi = (t: any) => typeof t === 'string' ? t.replace(/[\u001b\x1b]\[[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '').trim() : t;
 
-// Helper to normalize various status strings from different test runners
 const getStatusType = (status: string) => {
   const s = status?.toLowerCase() || '';
   if (['passed', 'success', 'expected'].includes(s)) return 'passed';
   if (['failed', 'error', 'fail'].includes(s)) return 'failed';
-  if (s === 'running') return 'running';
-  return 'skipped';
+  return 'running';
 };
 
 export function TestResultCard({ test, isExpanded, onToggle }: any) {
-  // Normalize the main test status
   const statusType = getStatusType(test.status);
   const isPassed = statusType === 'passed';
   const isFailed = statusType === 'failed';
 
-  const branchStyles = [
-    { line: 'border-amber-500', bg: 'bg-amber-500', text: 'text-amber-500' },
-    { line: 'border-sky-500', bg: 'bg-sky-500', text: 'text-sky-500' },
-    { line: 'border-pink-500', bg: 'bg-pink-500', text: 'text-pink-500' },
-    { line: 'border-indigo-500', bg: 'bg-indigo-500', text: 'text-indigo-500' },
-  ];
+  // 🟢 DATA LOGGING: Verify if steps exist in this specific card
+  useEffect(() => {
+    if (test) {
+      console.group(`📝 [CARD_TELEMETRY] ${test.title}`);
+      console.log("Status:", test.status);
+      console.log("Steps_Found:", test.steps?.length || 0);
+      console.log("Payload:", test);
+      console.groupEnd();
+    }
+  }, [test]);
 
   return (
     <div className={cn(
-      "border bg-[#09090b] rounded-none mb-0.5 transition-all font-mono",
-      // UI feedback based on normalized status
-      isPassed ? "border-zinc-800 hover:border-emerald-500/30" : 
-      isFailed ? "border-zinc-800 hover:border-rose-500/30" : "border-zinc-800",
-      isExpanded && "border-zinc-700 shadow-xl"
+      "border bg-[#000000] rounded-none mb-0.5 transition-all font-mono",
+      isPassed ? "border-zinc-900 hover:border-emerald-900/50" : 
+      isFailed ? "border-zinc-900 hover:border-rose-900/50" : "border-zinc-900",
+      isExpanded && (isPassed ? "border-emerald-800 shadow-2xl" : "border-rose-800 shadow-2xl")
     )}>
 
       {/* --- Main Test Header --- */}
-      <div onClick={onToggle} className="px-4 py-2.5 flex items-center justify-between cursor-pointer hover:bg-zinc-900/40 select-none">
-        <div className="flex items-center gap-3">
-          <div className={cn(
-            isPassed ? "text-emerald-500" : isFailed ? "text-rose-500" : "text-indigo-400"
-          )}>
-            {isPassed ? <CheckCircle2 size={16} strokeWidth={2.5} /> : <XCircle size={16} strokeWidth={2.5} />}
+      <div onClick={onToggle} className="px-5 py-3 flex items-center justify-between cursor-pointer hover:bg-zinc-900/40 select-none">
+        <div className="flex items-center gap-4">
+          <div className={cn(isPassed ? "text-emerald-500" : isFailed ? "text-rose-500" : "text-zinc-500")}>
+            {isPassed ? <CheckCircle2 size={18} strokeWidth={2.5} /> : <XCircle size={18} strokeWidth={2.5} />}
           </div>
-          <div className="flex items-baseline gap-3">
-            <h3 className="text-[12px] font-bold text-zinc-200 uppercase tracking-tight">{cleanAnsi(test.title)}</h3>
-            <span className="text-[9px] text-zinc-600 uppercase tracking-widest font-black opacity-50">#{test.run_number}</span>
+          <div className="flex flex-col">
+            <h3 className="text-[13px] font-bold text-zinc-200 uppercase tracking-tight truncate max-w-2xl">
+                {cleanAnsi(test.title)}
+            </h3>
+            <div className="flex items-center gap-2 mt-0.5">
+               <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Protocol: Execution_Registry</span>
+               <span className="w-1 h-1 bg-zinc-800 rounded-full" />
+               <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Ref: #RUN-{test.run_number}</span>
+            </div>
           </div>
         </div>
-        <div className="flex items-center gap-4">
-          <span className="text-[12px] text-zinc-500 tabular-nums flex items-center gap-1"><Clock size={10}/> {test.duration}</span>
-          {isExpanded ? <ChevronDown size={14} className="text-zinc-400" /> : <ChevronRight size={14} className="text-zinc-600" />}
+        <div className="flex items-center gap-6">
+          <span className="text-[11px] text-zinc-500 tabular-nums flex items-center gap-1.5 font-bold">
+            <Clock size={12} className="opacity-40"/> {test.duration}
+          </span>
+          <div className={cn(
+            "w-6 h-6 flex items-center justify-center border transition-all",
+            isExpanded ? "bg-white text-black border-white" : "border-zinc-800 text-zinc-600"
+          )}>
+            {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </div>
         </div>
       </div>
 
       {isExpanded && (
-        <div className="border-t border-zinc-800/50 animate-in fade-in duration-200">
+        <div className="border-t border-zinc-900 animate-in fade-in duration-200">
           
           {/* --- SCROLLABLE LOG VIEW --- */}
           <div className={cn(
-            "max-h-[400px] overflow-y-auto bg-[#0c0c0e] relative custom-scrollbar",
-            "[&::-webkit-scrollbar]:w-2",
-            "[&::-webkit-scrollbar-track]:bg-[#0c0c0e]",
+            "max-h-[600px] overflow-y-auto bg-black relative custom-scrollbar",
+            "[&::-webkit-scrollbar]:w-1.5",
+            "[&::-webkit-scrollbar-track]:bg-black",
             "[&::-webkit-scrollbar-thumb]:bg-zinc-800"
           )}>
             <div className="flex flex-col">
               
-              {/* Central Git Rail */}
-              <div className="absolute left-[64px] top-0 bottom-0 w-[1px] bg-zinc-800 z-0" />
+              <div className="absolute left-[70px] top-0 bottom-0 w-px bg-zinc-900 z-0" />
 
               {test.steps?.map((step: any, i: number) => {
-                const style = branchStyles[i % branchStyles.length];
                 const isOdd = i % 2 !== 0;
                 const stepStatus = getStatusType(step.status);
+                const isTestCaseStart = step.arguments?.toLowerCase().includes("running test case:");
 
                 return (
                   <div key={i} className={cn(
-                    "flex items-center group relative min-h-[32px] transition-colors border-l-2 border-l-transparent",
-                    isOdd ? "bg-white/[0.02]" : "bg-transparent", 
-                    "hover:bg-blue-500/5 hover:border-l-blue-500"
+                    "flex items-start group relative py-2 transition-colors border-l-4",
+                    isTestCaseStart 
+                        ? "bg-emerald-500/5 border-l-emerald-500" 
+                        : "border-l-transparent",
+                    !isTestCaseStart && isOdd ? "bg-white/[0.01]" : "bg-transparent",
+                    "hover:bg-zinc-900/40"
                   )}>
                     
-                    {/* 1. Index Gutter */}
-                    <div className="w-[44px] shrink-0 text-right pr-3 text-[12px] text-zinc-700 tabular-nums select-none font-bold ml-2">
+                    <div className="w-[58px] shrink-0 text-right pr-4 text-[11px] text-zinc-700 tabular-nums select-none font-bold mt-0.5">
                       {(i + 1).toString().padStart(2, '0')}
                     </div>
 
-                    {/* 2. Git Graph Column */}
-                    <div className="relative w-10 shrink-0 flex justify-center z-10 h-full mt-5">
-                      {isOdd && (
-                        <div className={cn(
-                          "absolute left-[50%] top-[-16px] bottom-[50%] w-4 border-l-[1.5px] border-b-[1.5px] rounded-bl-lg -translate-x-[0.5px] opacity-30",
-                          style.line
-                        )} />
-                      )}
+                    <div className="relative w-6 shrink-0 flex justify-center z-10 h-full mt-1.5">
                       <div className={cn(
-                        "w-2 h-2 rounded-full border border-[#0c0c0e] z-20",
-                        stepStatus === 'failed' ? "bg-rose-600 ring-2 ring-rose-900" : style.bg
+                        "w-2 h-2 rounded-none rotate-45 border border-black z-20 transition-all",
+                        stepStatus === 'failed' ? "bg-rose-500 shadow-[0_0_8px_rgba(225,29,72,0.4)]" : 
+                        isTestCaseStart ? "bg-emerald-400 scale-125 shadow-[0_0_8px_rgba(16,185,129,0.4)]" : 
+                        "bg-zinc-800 group-hover:bg-zinc-500"
                       )} />
                     </div>
 
-                    {/* 3. Concise One-Line Content */}
-                    <div className="flex-1 flex items-center gap-3 px-2 min-w-0 overflow-hidden">
-                      <span className={cn(
-                        "text-[12px] font-black uppercase tracking-tighter shrink-0",
-                        stepStatus === 'failed' ? "text-rose-500" : style.text
-                      )}>
-                        {step.command}
-                      </span>
+                    <div className="flex-1 flex flex-col gap-1 px-4 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={cn(
+                            "text-[11px] font-black uppercase tracking-tighter shrink-0",
+                            stepStatus === 'failed' ? "text-rose-500" : isTestCaseStart ? "text-emerald-500" : "text-zinc-600"
+                        )}>
+                            {isTestCaseStart && <Target size={10} className="inline mr-1 mb-0.5" />}
+                            {step.command}
+                        </span>
+                        <span className="text-[9px] text-zinc-800 font-bold tabular-nums ml-auto px-4 uppercase">
+                            {step.duration}
+                        </span>
+                      </div>
                       
-                      <span className="text-[11px] text-zinc-500 truncate font-mono opacity-80 group-hover:opacity-100 transition-opacity">
+                      <div className={cn(
+                        "text-[13px] font-mono leading-relaxed break-all whitespace-pre-wrap",
+                        isTestCaseStart ? "text-emerald-400 font-bold" : "text-zinc-400 opacity-90"
+                      )}>
                         {step.arguments}
-                      </span>
-                    </div>
-
-                    {/* 4. Metadata / Duration */}
-                    <div className="shrink-0 flex items-center gap-3 px-4">
-                        <span className="text-[8px] text-zinc-700 font-bold uppercase tracking-widest hidden sm:block">worker_node</span>
-                        <span className="text-[9px] text-zinc-600 tabular-nums font-bold">{step.duration}</span>
+                      </div>
                     </div>
                   </div>
                 );
@@ -128,13 +137,20 @@ export function TestResultCard({ test, isExpanded, onToggle }: any) {
 
           {/* Failure Log Box */}
           {isFailed && (
-            <div className="p-4 bg-rose-950/20 border-t border-rose-900/30">
-               <div className="flex items-center gap-2 text-rose-500 text-[9px] font-black uppercase tracking-[0.2em] mb-2">
-                 <XCircle size={10} /> Stacktrace_Output
+            <div className="p-6 bg-[#050000] border-t border-rose-900/20">
+               <div className="flex items-center gap-2 text-rose-500 text-[10px] font-black uppercase tracking-[0.3em] mb-4">
+                 Exception_Trace_Dump
                </div>
-               <pre className="text-rose-400/80 font-mono text-[10px] whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto custom-scrollbar">
-                 {cleanAnsi(test.error?.message || test.error)}
-               </pre>
+               <div className="space-y-4">
+                  <div className="text-rose-500 font-bold text-[13px] leading-relaxed border-l-2 border-rose-900 pl-4">
+                     {cleanAnsi(test.error?.message || test.error)}
+                  </div>
+                  {test.error?.stack && (
+                    <pre className="text-[10px] text-zinc-600 font-mono whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto custom-scrollbar bg-zinc-950 p-4 border border-zinc-900">
+                        {cleanAnsi(test.error.stack)}
+                    </pre>
+                  )}
+               </div>
             </div>
           )}
         </div>
