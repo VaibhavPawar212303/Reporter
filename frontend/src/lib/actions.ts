@@ -358,6 +358,24 @@ export async function getBuildDetails(buildId: number) {
     return null;
   }
 }
+export async function updateTestCase(id: number, data: any) {
+  try {
+    const { id: _, createdAt, updatedAt, ...updateData } = data;
+
+    await db.update(testCases)
+      .set({
+        ...updateData,
+        updatedAt: new Date()
+      })
+      .where(eq(testCases.id, id));
+
+    revalidatePath('/test-cases');
+    return { success: true };
+  } catch (error: any) {
+    console.error("❌ Update Error:", error);
+    return { error: error.message };
+  }
+}
 
 // need to be work 
 export async function uploadMasterTestCases(data: any[], projectId: number) {
@@ -471,24 +489,7 @@ export async function uploadMasterTestCases(data: any[], projectId: number) {
     return { error: e.message };
   }
 }
-export async function updateTestCase(id: number, data: any) {
-  try {
-    const { id: _, createdAt, updatedAt, ...updateData } = data;
 
-    await db.update(testCases)
-      .set({
-        ...updateData,
-        updatedAt: new Date()
-      })
-      .where(eq(testCases.id, id));
-
-    revalidatePath('/test-cases');
-    return { success: true };
-  } catch (error: any) {
-    console.error("❌ Update Error:", error);
-    return { error: error.message };
-  }
-}
 
 
 
