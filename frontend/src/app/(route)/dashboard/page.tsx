@@ -134,14 +134,6 @@ export default function Overview() {
             Control Tower
           </h1>
         </div>
-        <div className="flex gap-2">
-            <Link href="/cypress" className="px-4 py-2 bg-card border border-border hover:border-muted text-foreground text-[10px] font-bold rounded-none transition-all uppercase tracking-widest flex items-center gap-2">
-                Cypress Dashboard
-            </Link>
-            <Link href="/playwright" className="px-4 py-2 bg-card border border-border hover:border-muted text-foreground text-[10px] font-bold rounded-none transition-all uppercase tracking-widest flex items-center gap-2">
-                Playwright Dashboard
-            </Link>
-        </div>
       </header>
 
       {/* PROJECT TABS */}
