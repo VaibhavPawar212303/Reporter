@@ -7,19 +7,18 @@ export function StatusBadge({ status }: { status: string }) {
   const isPassed = ['passed', 'success', 'expected'].includes(s);
   const isFailed = ['failed', 'fail', 'error'].includes(s);
   const isRunning = s === 'running';
-  const isSkipped = s === 'skipped' || s === 'pending';
 
   const colorStyles = isFailed 
-    ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20' 
+    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-500 border-rose-500/20' 
     : isRunning 
-      ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 animate-pulse' 
+      ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20 animate-pulse' 
       : isPassed 
-        ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
-        : 'bg-zinc-800 text-zinc-500 border border-zinc-700'; // Default for skipped/unknown
+        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500 border-emerald-500/20'
+        : 'bg-muted/10 text-muted border-border'; // Neutral for skipped/unknown
 
   return (
     <span className={cn(
-      "text-[9px] px-2 py-0.5 rounded-none font-bold tracking-widest uppercase whitespace-nowrap",
+      "text-[9px] px-2 py-0.5 rounded-none font-bold tracking-widest uppercase whitespace-nowrap border transition-colors duration-300",
       colorStyles
     )}>
       {status || 'N/A'}

@@ -1,15 +1,47 @@
-// _components/FilterButton.tsx
+'use client';
+
+import { cn } from "@/lib/utils";
+
 export function FilterButton({ active, label, count, onClick, color }: any) {
   const colorClasses: any = {
-    green: active ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'hover:bg-green-500/5 text-zinc-500 border-transparent',
-    red: active ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'hover:bg-red-500/5 text-zinc-500 border-transparent',
-    indigo: active ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30' : 'hover:bg-indigo-500/5 text-zinc-500 border-transparent',
-    zinc: active ? 'bg-zinc-100/10 text-zinc-100 border-white/20' : 'hover:bg-white/5 text-zinc-500 border-transparent'
+    // Success State
+    green: active 
+      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500 border-emerald-500/30' 
+      : 'text-muted border-transparent hover:bg-emerald-500/5 hover:text-emerald-600 dark:hover:text-emerald-500',
+    
+    // Failed State
+    red: active 
+      ? 'bg-rose-500/10 text-rose-600 dark:text-rose-500 border-rose-500/30' 
+      : 'text-muted border-transparent hover:bg-rose-500/5 hover:text-rose-600 dark:hover:text-rose-500',
+    
+    // Running/Active State
+    indigo: active 
+      ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30' 
+      : 'text-muted border-transparent hover:bg-indigo-500/5 hover:text-indigo-600 dark:hover:text-indigo-400',
+    
+    // Total/Registry State (The high-contrast toggle)
+    zinc: active 
+      ? 'bg-foreground text-background border-foreground shadow-lg' 
+      : 'text-muted border-transparent hover:bg-muted/10 hover:text-foreground'
   };
+
   return (
-    <button onClick={onClick} className={`px-4 py-2 rounded-xl border text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-3 whitespace-nowrap shadow-sm ${colorClasses[color]}`}>
+    <button 
+      onClick={onClick} 
+      className={cn(
+        "px-4 py-2 rounded-xl border text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-3 whitespace-nowrap shadow-sm duration-300",
+        colorClasses[color]
+      )}
+    >
       {label}
-      <span className={`px-1.5 py-0.5 rounded-md text-[10px] ${active ? 'bg-white/10' : 'bg-black/20'}`}>{count}</span>
+      <span className={cn(
+        "px-1.5 py-0.5 rounded-md text-[10px] font-mono transition-colors",
+        active 
+          ? (color === 'zinc' ? "bg-background/20" : "bg-foreground/10") 
+          : "bg-muted/10"
+      )}>
+        {count}
+      </span>
     </button>
   );
 }
