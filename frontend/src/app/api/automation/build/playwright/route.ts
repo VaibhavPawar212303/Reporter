@@ -41,9 +41,6 @@ export async function POST(req: Request) {
     });
 
     const insertedId = (result as any).lastInsertId;
-
-    console.log(`[PIPELINE] New Build Initialized: ID #${insertedId} for Project #${project_id}`);
-
     return NextResponse.json({
       success: true,
       buildId: insertedId,

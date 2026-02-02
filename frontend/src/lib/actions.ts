@@ -60,9 +60,6 @@ export async function getDashboardStats() {
       }
       return { ...r, tests: parsedTests };
     });
-
-    console.log(`📊 Stats Sync: Found ${builds.length} builds and ${results.length} result rows.`);
-
     return {
       builds,
       results,
@@ -223,37 +220,16 @@ export async function importTestCases(projectId: number, dataArray: any[]) {
 }
 export async function getBuildDetails(buildId: number) {
   try {
-    console.log('\n' + '='.repeat(60));
-    console.log('🔍 getBuildDetails called with buildId:', buildId);
-    console.log('='.repeat(60));
-
     const { userId } = await auth();
-    console.log('📋 Step 1: userId:', userId);
-
     if (!userId) {
-      console.log('❌ No userId found');
       return { error: 'Unauthorized' };
     }
-
-    // Get user's organization
-    console.log('📋 Step 2: Getting organization membership');
     const membership = await db.query.organizationMembers.findFirst({
       where: eq(organizationMembers.userId, userId),
     });
-    console.log('   - Membership:', membership);
-
     if (!membership) {
-      console.log('❌ No organization found for user');
       return { error: 'No organization found' };
     }
-
-    console.log('   - Organization ID:', membership.organizationId);
-
-    // Get build (simple query without 'with')
-    console.log('📋 Step 3: Getting build');
-    console.log('   - Looking for buildId:', buildId);
-    console.log('   - With organizationId:', membership.organizationId);
-
     const build = await db
       .select()
       .from(automationBuilds)
@@ -264,38 +240,19 @@ export async function getBuildDetails(buildId: number) {
         )
       )
       .limit(1);
-
-    console.log('   - Build query result:', build);
-    console.log('   - Build length:', build?.length);
-
-    if (!build || build.length === 0) {
-      console.log('❌ Build not found');
-      
+    if (!build || build.length === 0) { 
       // Debug: Check if build exists without org filter
       const buildWithoutOrg = await db
         .select()
         .from(automationBuilds)
         .where(eq(automationBuilds.id, buildId))
         .limit(1);
-      
-      console.log('   - Build without org filter:', buildWithoutOrg);
       if (buildWithoutOrg.length > 0) {
-        console.log('   - Build exists but has different organizationId:', buildWithoutOrg[0].organizationId);
       }
       
       return null;
     }
-
     const buildData = build[0];
-    console.log('✅ Build found:', {
-      id: buildData.id,
-      projectId: buildData.projectId,
-      organizationId: buildData.organizationId,
-      status: buildData.status,
-    });
-
-    // Get project separately
-    console.log('📋 Step 4: Getting project');
     let project = null;
     if (buildData.projectId) {
       const projectResult = await db
@@ -304,11 +261,7 @@ export async function getBuildDetails(buildId: number) {
         .where(eq(projects.id, buildData.projectId))
         .limit(1);
       project = projectResult[0] || null;
-      console.log('   - Project:', project?.name);
     }
-
-    // Get triggered by user separately
-    console.log('📋 Step 5: Getting triggered by user');
     let triggeredBy = null;
     if (buildData.triggeredById) {
       const userResult = await db
@@ -317,17 +270,13 @@ export async function getBuildDetails(buildId: number) {
         .where(eq(users.id, buildData.triggeredById))
         .limit(1);
       triggeredBy = userResult[0] || null;
-      console.log('   - Triggered by:', triggeredBy?.email);
     }
 
-    // Get test results for this build
-    console.log('📋 Step 6: Getting test results');
     const results = await db
       .select()
       .from(testResults)
       .where(eq(testResults.buildId, buildId));
-    console.log('   - Results count:', results.length);
-
+  
     const finalResult = {
       ...buildData,
       project: project,
@@ -342,15 +291,6 @@ export async function getBuildDetails(buildId: number) {
           : [],
       })),
     };
-
-    console.log('✅ Final result:', {
-      buildId: finalResult.id,
-      projectName: finalResult.project?.name,
-      resultsCount: finalResult.results.length,
-      totalTests: finalResult.results.reduce((acc, r) => acc + r.tests.length, 0),
-    });
-    console.log('='.repeat(60) + '\n');
-
     return finalResult;
   } catch (e: any) {
     console.error('❌ getBuildDetails error:', e.message);
@@ -621,7 +561,6 @@ export async function getCypressTestSteps(specId: number, testTitle: string) {
     const testResult = await db.query.testResults.findFirst({
       where: eq(testResults.id, specId)
     });
-    console.log(testResult)
     if (!testResult) return null;
 
     // 2. Handle TiDB JSON parsing (Drizzle usually returns an object, but we check for safety)
@@ -633,13 +572,6 @@ export async function getCypressTestSteps(specId: number, testTitle: string) {
     const test = (testsArray as any[]).find((t: any) => t.title === testTitle);
 
     if (!test) return null;
-
-    /**
-     * 4. Return Cypress Mapped Data
-     * - steps: The command log (cy.visit, cy.get, etc)
-     * - logs: Any manual cy.log() or terminal output
-     * - stack_trace: Error details for debugging
-     */
     return {
       steps: test.steps || [],
       logs: test.logs || [],
@@ -651,7 +583,6 @@ export async function getCypressTestSteps(specId: number, testTitle: string) {
       stack_trace: test.stack_trace || (test.error?.stack) || null,
     };
   } catch (error) {
-    console.error('❌ Error fetching Cypress test steps:', error);
     return null;
   }
 }

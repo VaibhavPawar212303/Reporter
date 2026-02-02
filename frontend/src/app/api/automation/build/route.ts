@@ -33,7 +33,6 @@ export async function POST(req: Request) {
       });
 
       if (existingBuild) {
-        console.log(`[PIPELINE] Parallel Match: Session ${session_id} -> Build #${existingBuild.id}`);
         return NextResponse.json({
           success: true,
           buildId: existingBuild.id,
@@ -67,9 +66,6 @@ export async function POST(req: Request) {
       });
       finalBuildId = fallback?.id;
     }
-
-    console.log(`[PIPELINE] Handshake Complete: Build #${finalBuildId}`);
-
     return NextResponse.json({
       success: true,
       buildId: finalBuildId,
