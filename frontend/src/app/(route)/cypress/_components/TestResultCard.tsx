@@ -19,8 +19,6 @@ export function TestResultCard({ test, isExpanded, onToggle }: any) {
 
   useEffect(() => {
     if (test) {
-      console.group(`📝 [CARD_TELEMETRY] ${test.title}`);
-      console.groupEnd();
     }
   }, [test]);
 
