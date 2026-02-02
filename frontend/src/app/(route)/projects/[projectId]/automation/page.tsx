@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getBuildsByProjectAndType, getProjectById } from "@/lib/actions";
 import { Loader2, Activity, Calendar, Box, ChevronRight, Clock, Shield, Server } from "lucide-react";
-import { StatusBadge } from "@/app/(route)/cypress/_components/StatusBadge";
+import { StatusBadge } from "@/app/(route)/projects/[projectId]/automation/cypress/_components/StatusBadge";
 import { cn } from "@/lib/utils";
 
 export default function ProjectAutomationPage() {
@@ -94,7 +94,7 @@ export default function ProjectAutomationPage() {
           {builds.map((b) => (
             <div 
               key={`build-${b.id}`} 
-              onClick={() => router.push(`/${project.type.toLowerCase()}?projectId=${projectId}&buildId=${b.id}`)}
+              onClick={() => router.push(`automation/${project.type.toLowerCase()}?projectId=${projectId}&buildId=${b.id}`)}
               className="group flex items-center justify-between p-6 hover:bg-muted/5 transition-all cursor-pointer relative overflow-hidden"
             >
               <div className="flex items-center gap-6">
