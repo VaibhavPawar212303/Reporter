@@ -6,7 +6,7 @@ import { Zap, Shield, Activity, Globe, Cpu, PlayCircle, TrendingUp, BarChart3, C
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { cn } from "@/lib/utils";
 import Link from "next/link";
-import { StatusBadge } from "../cypress/_components/StatusBadge";
+import { StatusBadge } from "../projects/[projectId]/automation/cypress/_components/StatusBadge";
 import { useTheme } from "next-themes";
 
 export default function Overview() {
