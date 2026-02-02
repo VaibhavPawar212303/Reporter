@@ -11,10 +11,6 @@ const DEBUG_MODE = true;
 
 const debugLog = (section: string, data: any) => {
   if (!DEBUG_MODE) return;
-  console.log(`\n${'='.repeat(60)}`);
-  console.log(`🔍 [DEBUG] ${section}`);
-  console.log('='.repeat(60));
-  console.log(typeof data === 'object' ? JSON.stringify(data, null, 2) : data);
 };
 
 const cleanText = (text: any): string => {

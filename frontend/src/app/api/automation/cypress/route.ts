@@ -9,7 +9,6 @@ const DEBUG_MODE = true;
 
 const debugLog = (section: string, data: any) => {
   if (!DEBUG_MODE) return;
-  console.log(`🔍 [CYPRESS-DEBUG] ${section}:`, typeof data === 'object' ? JSON.stringify(data, null, 2) : data);
 };
 
 const cleanAnsi = (text: any): string => {

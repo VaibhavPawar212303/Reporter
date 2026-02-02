@@ -20,8 +20,6 @@ export function TestResultCard({ test, isExpanded, onToggle }: any) {
   useEffect(() => {
     if (test) {
       console.group(`📝 [CARD_TELEMETRY] ${test.title}`);
-      console.log("Status:", test.status);
-      console.log("Steps_Found:", test.steps?.length || 0);
       console.groupEnd();
     }
   }, [test]);
